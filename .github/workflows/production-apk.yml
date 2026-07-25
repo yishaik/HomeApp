@@ -25,7 +25,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat build-source/homeapp-src.part* | base64 --decode > /tmp/homeapp-source.tar.gz
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, gzip, hashlib
+
+          parts = sorted(Path("build-source").glob("homeapp-src.part*"))
+          if not parts:
+              raise SystemExit("No source bundle parts found")
+          encoded = "".join(part.read_text(encoding="utf-8").strip() for part in parts)
+          archive = base64.b64decode(encoded, validate=True)
+          print(f"Reconstructed {len(parts)} parts, {len(encoded)} base64 chars, {len(archive)} archive bytes")
+          print("Archive SHA-256:", hashlib.sha256(archive).hexdigest())
+          gzip.decompress(archive)
+          Path("/tmp/homeapp-source.tar.gz").write_bytes(archive)
+          PY
           tar -xzf /tmp/homeapp-source.tar.gz
           test -f app/build.gradle.kts
           test -f app/src/main/AndroidManifest.xml
