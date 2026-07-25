@@ -110,8 +110,8 @@ fun ItemDetailScreen(
                             Text("שיוך", style = MaterialTheme.typography.labelLarge)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 FilterChip(assignee == Assignee.NONE, { assignee = Assignee.NONE }, label = { Text("ללא") })
-                                FilterChip(assignee == Assignee.USER_ONE, { assignee = Assignee.USER_ONE }, label = { Text(users["u1"]?.displayName ?: "ישי") })
-                                FilterChip(assignee == Assignee.USER_TWO, { assignee = Assignee.USER_TWO }, label = { Text(users["u2"]?.displayName ?: "מעיין") })
+                                FilterChip(assignee == Assignee.USER_ONE, { assignee = Assignee.USER_ONE }, label = { Text(users[assigneeMemberId(Assignee.USER_ONE, users.keys)]?.displayName ?: "ישי") })
+                                FilterChip(assignee == Assignee.USER_TWO, { assignee = Assignee.USER_TWO }, label = { Text(users[assigneeMemberId(Assignee.USER_TWO, users.keys)]?.displayName ?: "מעיין") })
                             }
                             Spacer(Modifier.height(6.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) { Switch(pinned, { pinned = it }); Spacer(Modifier.width(8.dp)); Text("הצמדה") }

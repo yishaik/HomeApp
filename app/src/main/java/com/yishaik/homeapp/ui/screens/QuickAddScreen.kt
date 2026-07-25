@@ -37,6 +37,7 @@ private val assigneeChoices = listOf(Assignee.USER_ONE to "ישי", Assignee.USE
 @Composable
 fun QuickAddSheet(
     currentUser: AppUser,
+    memberIds: Collection<String>,
     online: Boolean,
     defaultEventReminderMinutes: Int,
     defaultTaskReminderMinutes: Int,
@@ -128,9 +129,10 @@ fun QuickAddSheet(
                     val checklist = if (type == ItemType.LIST) listItems.lines().map(String::trim).filter { it.isNotBlank() }.mapIndexed { i, line -> ChecklistEntry(title = line, orderIndex = i) } else emptyList()
                     val resolvedAssignee = when {
                         type == ItemType.EVENT || type == ItemType.TASK ->
-                            assignee.takeIf { it != Assignee.NONE } ?: if (currentUser.id == "u1") Assignee.USER_ONE else Assignee.USER_TWO
+                            assignee.takeIf { it != Assignee.NONE } ?: assigneeSlot(currentUser.id, memberIds)
                         else -> Assignee.NONE
                     }
+                    val noteReaders = (memberIds + currentUser.id).filter { it.isNotBlank() }.distinct()
                     val title = when { type == ItemType.LIST -> listTitle.trim().ifBlank { "רשימה" }; else -> parsed.title.ifBlank { text.trim() } }
                     onSave(HomeItem(
                         id = UUID.randomUUID().toString(), type = type, title = title, body = if (type == ItemType.NOTE) text.trim() else "",
@@ -143,7 +145,7 @@ fun QuickAddSheet(
                         checklist = checklist,
                         pinned = pinned,
                         notifyOtherUser = notify,
-                        readReceipts = if (type == ItemType.NOTE) listOf(ReadReceipt("u1", null), ReadReceipt("u2", null)) else emptyList(),
+                        readReceipts = if (type == ItemType.NOTE) noteReaders.map { ReadReceipt(it, null) } else emptyList(),
                     ))
                 },
                 enabled = online && canSave, modifier = Modifier.fillMaxWidth()

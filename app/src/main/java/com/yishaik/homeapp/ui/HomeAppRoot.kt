@@ -180,10 +180,10 @@ private fun MainApp(app: HomeApplication, onLogout: () -> Unit) {
             currentUser = user,
             online = online,
             onBack = { selectedItem = null },
-            onSave = { changed -> scope.launch { app.repository.save(changed).onSuccess { app.reminderScheduler.schedule(it); selectedItem = it } } },
-            onComplete = { scope.launch { app.repository.complete(selectedItem!!.id); selectedItem = null } },
-            onArchive = { scope.launch { app.repository.archive(selectedItem!!.id); selectedItem = null } },
-            onDelete = { scope.launch { app.repository.delete(selectedItem!!.id); selectedItem = null } },
+            onSave = { changed -> scope.launch { app.repository.save(changed).onSuccess { app.reminderScheduler.schedule(it, user.id); selectedItem = it } } },
+            onComplete = { scope.launch { val id = selectedItem!!.id; app.repository.complete(id); app.reminderScheduler.cancel(id); selectedItem = null } },
+            onArchive = { scope.launch { val id = selectedItem!!.id; app.repository.archive(id); app.reminderScheduler.cancel(id); selectedItem = null } },
+            onDelete = { scope.launch { val id = selectedItem!!.id; app.repository.delete(id); app.reminderScheduler.cancel(id); selectedItem = null } },
             onOpenItem = { id -> selectedItem = items.firstOrNull { it.id == id } },
             onToggleChecklist = { entryId -> scope.launch { val id = selectedItem!!.id; app.repository.toggleChecklist(id, entryId); selectedItem = app.repository.items.value.firstOrNull { it.id == id } } },
             onAddChecklistEntry = { title -> scope.launch { val id = selectedItem!!.id; app.repository.addChecklistEntry(id, title); selectedItem = app.repository.items.value.firstOrNull { it.id == id } } },
@@ -192,8 +192,8 @@ private fun MainApp(app: HomeApplication, onLogout: () -> Unit) {
                 scope.launch {
                     val id = selectedItem!!.id
                     val reminders = if (minutes != null) listOf(com.yishaik.homeapp.domain.Reminder(minutesBefore = minutes, userId = user.id)) else emptyList()
-                    app.repository.setReminders(id, reminders).onSuccess { saved ->
-                        app.reminderScheduler.schedule(saved)
+                    app.repository.setReminders(id, user.id, reminders).onSuccess { saved ->
+                        app.reminderScheduler.schedule(saved, user.id)
                         selectedItem = saved
                     }
                 }
@@ -272,10 +272,10 @@ private fun MainApp(app: HomeApplication, onLogout: () -> Unit) {
         val onQuickAction: (HomeItem, ItemQuickAction) -> Unit = { item, action ->
             scope.launch {
                 when (action) {
-                    ItemQuickAction.TOGGLE_PIN -> app.repository.save(item.copy(pinned = !item.pinned)).onSuccess { app.reminderScheduler.schedule(it) }
-                    ItemQuickAction.ARCHIVE -> app.repository.archive(item.id)
-                    ItemQuickAction.DELETE -> app.repository.delete(item.id)
-                    ItemQuickAction.COMPLETE -> app.repository.complete(item.id)
+                    ItemQuickAction.TOGGLE_PIN -> app.repository.save(item.copy(pinned = !item.pinned)).onSuccess { app.reminderScheduler.schedule(it, user.id) }
+                    ItemQuickAction.ARCHIVE -> { app.repository.archive(item.id); app.reminderScheduler.cancel(item.id) }
+                    ItemQuickAction.DELETE -> { app.repository.delete(item.id); app.reminderScheduler.cancel(item.id) }
+                    ItemQuickAction.COMPLETE -> { app.repository.complete(item.id); app.reminderScheduler.cancel(item.id) }
                 }
             }
         }
@@ -318,6 +318,7 @@ private fun MainApp(app: HomeApplication, onLogout: () -> Unit) {
     if (showAdd) {
         QuickAddSheet(
             currentUser = user,
+            memberIds = users.keys,
             online = online,
             defaultEventReminderMinutes = preferences.defaultEventReminderMinutes.firstOrNull() ?: 30,
             defaultTaskReminderMinutes = preferences.defaultTaskReminderMinutes.firstOrNull() ?: 0,
@@ -325,7 +326,7 @@ private fun MainApp(app: HomeApplication, onLogout: () -> Unit) {
             onSave = { item ->
                 scope.launch {
                     app.repository.save(item).onSuccess { saved ->
-                        app.reminderScheduler.schedule(saved)
+                        app.reminderScheduler.schedule(saved, user.id)
                         showAdd = false
                     }
                 }

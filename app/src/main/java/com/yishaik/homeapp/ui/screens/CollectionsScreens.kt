@@ -36,7 +36,7 @@ fun TasksScreen(items: List<HomeItem>, users: Map<String, AppUser>, currentUser:
     val now = Instant.now()
     val otherUser = users.values.firstOrNull { it.id != currentUser.id }
     val otherLabel = otherUser?.displayName ?: "השני"
-    val myAssignee = if (currentUser.id == "u1") Assignee.USER_ONE else Assignee.USER_TWO
+    val myAssignee = assigneeSlot(currentUser.id, users.keys)
     val otherAssignee = if (myAssignee == Assignee.USER_ONE) Assignee.USER_TWO else Assignee.USER_ONE
     fun mine(t: HomeItem) = t.creatorId == currentUser.id || t.assignee == myAssignee || t.assignee == Assignee.BOTH
     fun theirs(t: HomeItem) = (otherUser != null && t.creatorId == otherUser.id) || t.assignee == otherAssignee || t.assignee == Assignee.BOTH

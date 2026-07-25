@@ -11,7 +11,8 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         return app.repository.syncNow().fold(
             onSuccess = {
                 app.repository.publishScheduledNotes()
-                app.repository.items.value.forEach(app.reminderScheduler::schedule)
+                val meId = app.repository.currentUser.value.id
+                app.repository.items.value.forEach { app.reminderScheduler.schedule(it, meId) }
                 Result.success()
             },
             onFailure = { Result.retry() },

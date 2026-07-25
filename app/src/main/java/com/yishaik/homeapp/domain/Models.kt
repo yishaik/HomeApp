@@ -10,6 +10,19 @@ enum class ItemType { EVENT, TASK, LIST, NOTE }
 enum class ItemStatus { ACTIVE, COMPLETED, CANCELLED, ARCHIVED }
 enum class EditPolicy { SHARED_EDIT, CREATOR_ONLY }
 enum class Assignee { NONE, USER_ONE, USER_TWO, BOTH }
+
+/** Deterministically maps a real household member id to the USER_ONE/USER_TWO slot by sorting the
+ *  two member ids the same way on both devices — no reliance on the old "u1"/"u2" literals. */
+fun assigneeSlot(userId: String, memberIds: Collection<String>): Assignee {
+    val sorted = memberIds.filter { it.isNotBlank() }.distinct().sorted()
+    return if (sorted.indexOf(userId) == 1) Assignee.USER_TWO else Assignee.USER_ONE
+}
+
+/** The real member id backing an assignee slot, given the household members (sorted). */
+fun assigneeMemberId(slot: Assignee, memberIds: Collection<String>): String? {
+    val sorted = memberIds.filter { it.isNotBlank() }.distinct().sorted()
+    return when (slot) { Assignee.USER_ONE -> sorted.getOrNull(0); Assignee.USER_TWO -> sorted.getOrNull(1); else -> null }
+}
 enum class CalendarView { DAY, WEEK, MONTH, YEAR }
 
 data class AppUser(

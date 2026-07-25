@@ -237,9 +237,11 @@ class HomeRepository(
         item.copy(checklist = item.checklist.map { if (it.id == entryId) it.copy(title = title.trim()) else it })
     }
 
-    suspend fun setReminders(itemId: String, reminders: List<Reminder>): Result<HomeItem> {
+    /** Sets [userId]'s reminders on an item while preserving the other member's reminders. */
+    suspend fun setReminders(itemId: String, userId: String, reminders: List<Reminder>): Result<HomeItem> {
         val item = _items.value.firstOrNull { it.id == itemId } ?: return Result.failure(NoSuchElementException(itemId))
-        return save(item.copy(reminders = reminders))
+        val merged = item.reminders.filter { it.userId != userId } + reminders.map { it.copy(userId = userId) }
+        return save(item.copy(reminders = merged))
     }
 
     /**
