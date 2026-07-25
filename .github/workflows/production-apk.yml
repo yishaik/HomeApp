@@ -32,11 +32,28 @@ jobs:
           parts = sorted(Path("build-source").glob("homeapp-src.part*"))
           if not parts:
               raise SystemExit("No source bundle parts found")
-          encoded = "".join(part.read_text(encoding="utf-8").strip() for part in parts)
-          archive = base64.b64decode(encoded, validate=True)
-          print(f"Reconstructed {len(parts)} parts, {len(encoded)} base64 chars, {len(archive)} archive bytes")
-          print("Archive SHA-256:", hashlib.sha256(archive).hexdigest())
-          gzip.decompress(archive)
+          texts = [part.read_text(encoding="utf-8").strip() for part in parts]
+          candidates = []
+          try:
+              candidates.append(("joined-base64", base64.b64decode("".join(texts))))
+          except Exception as exc:
+              print("Joined Base64 decode failed:", exc)
+          try:
+              candidates.append(("independent-base64-parts", b"".join(base64.b64decode(text) for text in texts)))
+          except Exception as exc:
+              print("Independent part decode failed:", exc)
+
+          archive = None
+          for label, candidate in candidates:
+              try:
+                  gzip.decompress(candidate)
+                  archive = candidate
+                  print(f"Using {label}: {len(candidate)} bytes; SHA-256 {hashlib.sha256(candidate).hexdigest()}")
+                  break
+              except Exception as exc:
+                  print(f"{label} did not pass gzip validation: {exc}")
+          if archive is None:
+              raise SystemExit("No bundle reconstruction method produced a valid gzip archive")
           Path("/tmp/homeapp-source.tar.gz").write_bytes(archive)
           PY
           tar -xzf /tmp/homeapp-source.tar.gz
