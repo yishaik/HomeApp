@@ -1,0 +1,1 @@
+Retry source reconstruction using continuous and independent Base64 chunk strategies.
