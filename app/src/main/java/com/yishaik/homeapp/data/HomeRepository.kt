@@ -247,11 +247,15 @@ class HomeRepository(
     }
 
     /** Renames the current user in memory and persists the display name to the local session so it survives reloads. */
-    fun renameCurrentUser(displayName: String) {
+    fun renameCurrentUser(displayName: String) = setProfile(displayName, _currentUser.value.avatar, _currentUser.value.accentArgb)
+
+    /** Updates the current user's display name, avatar glyph and accent colour, persisting to the local session. */
+    fun setProfile(displayName: String, avatar: String, accentArgb: Long) {
         val name = displayName.trim().ifBlank { return }
-        val updated = _currentUser.value.copy(displayName = name)
+        val glyph = avatar.trim().take(2).ifBlank { _currentUser.value.avatar }
+        val updated = _currentUser.value.copy(displayName = name, avatar = glyph, accentArgb = accentArgb)
         setCurrentUser(updated)
-        sessionStore.load()?.let { sessionStore.save(it.copy(displayName = name)) }
+        sessionStore.load()?.let { sessionStore.save(it.copy(displayName = name, avatar = glyph, accentArgb = accentArgb)) }
     }
 
     fun logout() {

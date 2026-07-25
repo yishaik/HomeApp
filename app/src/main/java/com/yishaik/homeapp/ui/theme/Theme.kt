@@ -5,8 +5,11 @@ import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.core.view.WindowCompat
 
 val EventColor = Color(0xFF3C6EED)
@@ -36,7 +39,9 @@ fun HomeAppTheme(accentArgb: Long = 0xFF5A5BD7, content: @Composable () -> Unit)
     val dark = isSystemInDarkTheme()
     val accent = Color(accentArgb)
     val scheme = if (dark) Dark.copy(primary = accent) else Light.copy(primary = accent)
-    MaterialTheme(colorScheme = scheme, typography = Typography(), content = content)
+    MaterialTheme(colorScheme = scheme, typography = Typography()) {
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl, content = content)
+    }
     val view = LocalView.current
     if (!view.isInEditMode) {
         val window = (view.context as Activity).window

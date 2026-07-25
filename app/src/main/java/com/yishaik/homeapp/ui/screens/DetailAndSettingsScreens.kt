@@ -2,9 +2,12 @@ package com.yishaik.homeapp.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items as lazyItems
@@ -158,16 +161,28 @@ fun ItemDetailScreen(
                 item { Text("פריטים מקושרים", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
                 lazyItems(item.linkedItems) { linked -> ListItem(modifier = Modifier.clickable { onOpenItem(linked.itemId) }, headlineContent = { Text(linked.title) }, leadingContent = { Icon(Icons.Default.Link, null) }) }
             }
-            item { Text("תגובות", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+            item {
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.ChatBubbleOutline, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("דיון", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    if (item.comments.isNotEmpty()) { Spacer(Modifier.width(8.dp)); Badge { Text(item.comments.size.toString()) } }
+                }
+                Spacer(Modifier.height(4.dp))
+            }
+            if (item.comments.isEmpty()) item { Text("אין תגובות עדיין", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             lazyItems(item.comments) { c ->
                 val author = users[c.authorId]
-                Card { Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) { Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
                     if (author != null) UserAvatar(author)
                     Spacer(Modifier.width(10.dp)); Column { Text(author?.displayName ?: c.authorId, fontWeight = FontWeight.Bold); Text(c.text); c.link?.let { LinkText(it, context) } }
                 }}
             }
             item {
-                OutlinedTextField(comment, { comment = it }, modifier = Modifier.fillMaxWidth(), label = { Text("תגובה חדשה") }, trailingIcon = {
+                OutlinedTextField(comment, { comment = it }, modifier = Modifier.fillMaxWidth(), label = { Text("כתיבת תגובה…") }, trailingIcon = {
                     IconButton(enabled = online && comment.isNotBlank(), onClick = { onSave(item.copy(comments = item.comments + Comment(authorId = currentUser.id, text = comment))); comment = "" }) { Icon(Icons.Default.Send, null) }
                 })
             }
@@ -211,7 +226,7 @@ private fun openUrl(context: android.content.Context, url: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DateTimePickerDialog(initial: Instant?, onDismiss: () -> Unit, onConfirm: (Instant) -> Unit) {
+internal fun DateTimePickerDialog(initial: Instant?, onDismiss: () -> Unit, onConfirm: (Instant) -> Unit) {
     val zone = ZoneId.systemDefault()
     val base = initial?.atZone(zone) ?: Instant.now().atZone(zone)
     val dateState = rememberDatePickerState(initialSelectedDateMillis = base.toLocalDate().atStartOfDay(zone).toInstant().toEpochMilli())
@@ -313,7 +328,7 @@ fun SettingsScreen(
     preferences: UserPreferences,
     hasPin: Boolean,
     onBack: () -> Unit,
-    onRenameProfile: (String) -> Unit,
+    onSaveProfile: (String, String, Long) -> Unit,
     onUpdatePreferences: ((UserPreferences) -> UserPreferences) -> Unit,
     onSetPin: (String) -> Unit,
     onClearPin: () -> Unit,
@@ -364,7 +379,7 @@ fun SettingsScreen(
     }
 
     when (dialog) {
-        SettingsDialog.PROFILE -> TextInputDialog("שם תצוגה", currentUser.displayName, onDismiss = { dialog = null }) { onRenameProfile(it); dialog = null }
+        SettingsDialog.PROFILE -> ProfileDialog(currentUser, onDismiss = { dialog = null }) { name, avatar, accent -> onSaveProfile(name, avatar, accent); dialog = null }
         SettingsDialog.LANDING -> ChoiceDialog("מסך פתיחה", landingOptions.map { it.first }, landingLabel(preferences.startDestination), onDismiss = { dialog = null }) { label ->
             landingOptions.firstOrNull { it.first == label }?.let { opt -> onUpdatePreferences { it.copy(startDestination = opt.second) } }; dialog = null
         }
@@ -417,6 +432,41 @@ private fun TextInputDialog(title: String, initial: String, onDismiss: () -> Uni
         title = { Text(title) },
         text = { OutlinedTextField(text, { text = it }, singleLine = true, modifier = Modifier.fillMaxWidth()) },
         confirmButton = { TextButton(onClick = { if (text.isNotBlank()) onConfirm(text.trim()) }, enabled = text.isNotBlank()) { Text("שמירה") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("ביטול") } },
+    )
+}
+
+@Composable
+private fun ProfileDialog(user: AppUser, onDismiss: () -> Unit, onConfirm: (String, String, Long) -> Unit) {
+    var name by remember { mutableStateOf(user.displayName) }
+    var avatar by remember { mutableStateOf(user.avatar) }
+    var accent by remember { mutableStateOf(user.accentArgb) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("פרופיל") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    UserAvatar(user.copy(avatar = avatar.ifBlank { "?" }, accentArgb = accent), size = 48)
+                    OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("שם תצוגה") }, modifier = Modifier.weight(1f))
+                }
+                OutlinedTextField(avatar, { if (it.length <= 2) avatar = it }, singleLine = true, label = { Text("אות או אמוג׳י") }, modifier = Modifier.fillMaxWidth())
+                Text("צבע", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    accentOptions.forEach { (_, argb) ->
+                        val selected = argb == accent
+                        Box(
+                            Modifier.size(if (selected) 40.dp else 34.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(androidx.compose.ui.graphics.Color(argb))
+                                .clickable { accent = argb },
+                            contentAlignment = Alignment.Center,
+                        ) { if (selected) Icon(Icons.Default.Check, null, tint = androidx.compose.ui.graphics.Color.White) }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { if (name.isNotBlank()) onConfirm(name.trim(), avatar.trim().ifBlank { user.avatar }, accent) }, enabled = name.isNotBlank()) { Text("שמירה") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("ביטול") } },
     )
 }

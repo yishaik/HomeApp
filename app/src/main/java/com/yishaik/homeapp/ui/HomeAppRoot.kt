@@ -205,7 +205,7 @@ private fun MainApp(app: HomeApplication, onLogout: () -> Unit) {
             preferences = preferences,
             hasPin = hasPin,
             onBack = { showSettings = false },
-            onRenameProfile = { name -> app.repository.renameCurrentUser(name) },
+            onSaveProfile = { name, avatar, accent -> app.repository.setProfile(name, avatar, accent) },
             onUpdatePreferences = { transform -> app.preferencesStore.update(transform) },
             onSetPin = { pin -> app.pinVault.setPin(pin); hasPin = true },
             onClearPin = { app.pinVault.clearPin(); hasPin = false },
