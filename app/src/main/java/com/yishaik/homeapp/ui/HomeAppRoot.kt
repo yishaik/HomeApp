@@ -71,7 +71,8 @@ private val destinations = listOf(
 @Composable
 fun HomeAppRoot(app: HomeApplication) {
     var activated by remember { mutableStateOf(app.activationManager.activated) }
-    var unlocked by remember { mutableStateOf(!app.pinVault.shouldLock(5)) }
+    val pinTimeout = remember { app.preferencesStore.read().pinTimeoutMinutes }
+    var unlocked by remember { mutableStateOf(!app.pinVault.shouldLock(pinTimeout)) }
     var needsPinSetup by remember { mutableStateOf(activated && !app.pinVault.hasPin()) }
     var activationLoading by remember { mutableStateOf(false) }
     var activationError by remember { mutableStateOf<String?>(null) }
@@ -138,20 +139,30 @@ fun HomeAppRoot(app: HomeApplication) {
             unlocked = true
         }
         !unlocked -> PinUnlockScreen { pin -> if (app.pinVault.verify(pin)) unlocked = true }
-        else -> MainApp(app)
+        else -> MainApp(app, onLogout = {
+            app.repository.logout()
+            activated = false
+            unlocked = false
+            needsPinSetup = false
+            approvalRequestId = null
+        })
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MainApp(app: HomeApplication) {
+private fun MainApp(app: HomeApplication, onLogout: () -> Unit) {
     val items by app.repository.items.collectAsStateWithLifecycle()
     val online by app.repository.online.collectAsStateWithLifecycle()
     val user by app.repository.currentUser.collectAsStateWithLifecycle()
     val users by app.repository.users.collectAsStateWithLifecycle()
+    val notifications by app.repository.notifications.collectAsStateWithLifecycle()
+    val unreadCount by app.repository.unreadCount.collectAsStateWithLifecycle()
+    val preferences by app.preferencesStore.prefs.collectAsStateWithLifecycle()
+    var hasPin by remember { mutableStateOf(app.pinVault.hasPin()) }
     val nav = rememberNavController()
     val entry by nav.currentBackStackEntryAsState()
-    val current = entry?.destination?.route ?: "today"
+    val current = entry?.destination?.route ?: preferences.startDestination
     var showAdd by remember { mutableStateOf(false) }
     var selectedItem by remember { mutableStateOf<HomeItem?>(null) }
     var showNotifications by remember { mutableStateOf(false) }
@@ -166,22 +177,49 @@ private fun MainApp(app: HomeApplication) {
             currentUser = user,
             online = online,
             onBack = { selectedItem = null },
-            onSave = { changed -> scope.launch { app.repository.save(changed).onSuccess { selectedItem = it } } },
+            onSave = { changed -> scope.launch { app.repository.save(changed).onSuccess { app.reminderScheduler.schedule(it); selectedItem = it } } },
             onComplete = { scope.launch { app.repository.complete(selectedItem!!.id); selectedItem = null } },
             onArchive = { scope.launch { app.repository.archive(selectedItem!!.id); selectedItem = null } },
+            onDelete = { scope.launch { app.repository.delete(selectedItem!!.id); selectedItem = null } },
+            onOpenItem = { id -> selectedItem = items.firstOrNull { it.id == id } },
+            onToggleChecklist = { entryId -> scope.launch { val id = selectedItem!!.id; app.repository.toggleChecklist(id, entryId); selectedItem = app.repository.items.value.firstOrNull { it.id == id } } },
+            onAddChecklistEntry = { title -> scope.launch { val id = selectedItem!!.id; app.repository.addChecklistEntry(id, title); selectedItem = app.repository.items.value.firstOrNull { it.id == id } } },
+            onRemoveChecklistEntry = { entryId -> scope.launch { val id = selectedItem!!.id; app.repository.removeChecklistEntry(id, entryId); selectedItem = app.repository.items.value.firstOrNull { it.id == id } } },
+            onSetReminder = { minutes ->
+                scope.launch {
+                    val id = selectedItem!!.id
+                    val reminders = if (minutes != null) listOf(com.yishaik.homeapp.domain.Reminder(minutesBefore = minutes, userId = user.id)) else emptyList()
+                    app.repository.setReminders(id, reminders).onSuccess { saved ->
+                        app.reminderScheduler.schedule(saved)
+                        selectedItem = saved
+                    }
+                }
+            },
         )
         return
     }
     if (showSettings) {
         BackHandler { showSettings = false }
-        SettingsScreen(onBack = { showSettings = false })
+        SettingsScreen(
+            currentUser = user,
+            preferences = preferences,
+            hasPin = hasPin,
+            onBack = { showSettings = false },
+            onRenameProfile = { name -> app.repository.renameCurrentUser(name) },
+            onUpdatePreferences = { transform -> app.preferencesStore.update(transform) },
+            onSetPin = { pin -> app.pinVault.setPin(pin); hasPin = true },
+            onClearPin = { app.pinVault.clearPin(); hasPin = false },
+            onLogout = { showSettings = false; onLogout() },
+        )
         return
     }
     if (showNotifications) {
         BackHandler { showNotifications = false }
         NotificationsScreen(
+            notifications = notifications,
             onBack = { showNotifications = false },
-            onOpenItem = { id -> selectedItem = items.firstOrNull { it.id == id } },
+            onMarkAll = { app.repository.markAllNotificationsRead() },
+            onOpenItem = { id -> selectedItem = items.firstOrNull { it.id == id }; showNotifications = false },
         )
         return
     }
@@ -195,7 +233,7 @@ private fun MainApp(app: HomeApplication) {
                     actions = {
                         IconButton(onClick = { showSettings = true }) { Icon(Icons.Default.AccountCircle, null) }
                         IconButton(onClick = { showNotifications = true }) {
-                            BadgedBox(badge = { Badge { Text("2") } }) { Icon(Icons.Default.Notifications, null) }
+                            BadgedBox(badge = { if (unreadCount > 0) Badge { Text(unreadCount.toString()) } }) { Icon(Icons.Default.Notifications, null) }
                         }
                     },
                 )
@@ -223,13 +261,14 @@ private fun MainApp(app: HomeApplication) {
             FloatingActionButton(onClick = { showAdd = true }) { Icon(Icons.Default.Add, "Add") }
         },
     ) { padding ->
-        NavHost(nav, startDestination = "today", modifier = Modifier.padding(padding)) {
+        NavHost(nav, startDestination = preferences.startDestination.takeIf { d -> destinations.any { it.route == d } } ?: "today", modifier = Modifier.padding(padding)) {
             composable("today") { TodayScreen(items, users, user, onOpenItem = { selectedItem = it }) }
             composable("calendar") { CalendarScreen(items, users, onOpenItem = { selectedItem = it }) }
             composable("tasks") {
                 TasksScreen(
                     items,
                     users,
+                    user,
                     onOpenItem = { selectedItem = it },
                     onComplete = { scope.launch { app.repository.complete(it.id) } },
                 )
@@ -259,6 +298,8 @@ private fun MainApp(app: HomeApplication) {
         QuickAddSheet(
             currentUser = user,
             online = online,
+            defaultEventReminderMinutes = preferences.defaultEventReminderMinutes.firstOrNull() ?: 30,
+            defaultTaskReminderMinutes = preferences.defaultTaskReminderMinutes.firstOrNull() ?: 0,
             onDismiss = { showAdd = false },
             onSave = { item ->
                 scope.launch {

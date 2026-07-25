@@ -32,9 +32,11 @@ private val Dark = darkColorScheme(
 )
 
 @Composable
-fun HomeAppTheme(content: @Composable () -> Unit) {
+fun HomeAppTheme(accentArgb: Long = 0xFF5A5BD7, content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()
-    MaterialTheme(colorScheme = if (dark) Dark else Light, typography = Typography(), content = content)
+    val accent = Color(accentArgb)
+    val scheme = if (dark) Dark.copy(primary = accent) else Light.copy(primary = accent)
+    MaterialTheme(colorScheme = scheme, typography = Typography(), content = content)
     val view = LocalView.current
     if (!view.isInEditMode) {
         val window = (view.context as Activity).window

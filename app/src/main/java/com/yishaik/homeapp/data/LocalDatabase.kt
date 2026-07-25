@@ -34,6 +34,8 @@ class LocalDatabase(context: Context) : SQLiteOpenHelper(context, "homeapp.db", 
 
     fun clearAll() = writableDatabase.transaction { delete("items", null, null) }
 
+    fun deleteItem(id: String) { writableDatabase.delete("items", "id=?", arrayOf(id)) }
+
     fun getMetadata(key: String): String? = readableDatabase.query("metadata", arrayOf("value"), "key=?", arrayOf(key), null, null, null).use {
         if (it.moveToFirst()) it.getString(0) else null
     }

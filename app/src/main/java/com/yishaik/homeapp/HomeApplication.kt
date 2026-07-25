@@ -9,6 +9,7 @@ import androidx.work.WorkManager
 import com.yishaik.homeapp.data.ConnectivityObserver
 import com.yishaik.homeapp.data.HomeRepository
 import com.yishaik.homeapp.data.LocalDatabase
+import com.yishaik.homeapp.data.PreferencesStore
 import com.yishaik.homeapp.notifications.NotificationChannels
 import com.yishaik.homeapp.notifications.ReminderScheduler
 import com.yishaik.homeapp.notifications.SyncWorker
@@ -20,6 +21,7 @@ import java.util.concurrent.TimeUnit
 
 class HomeApplication : Application() {
     lateinit var repository: HomeRepository
+    lateinit var preferencesStore: PreferencesStore
     lateinit var pinVault: PinVault
     lateinit var sessionStore: SessionStore
     lateinit var activationManager: ActivationManager
@@ -29,8 +31,10 @@ class HomeApplication : Application() {
         super.onCreate()
         NotificationChannels.create(this)
         val api = SupabaseApi()
+        val database = LocalDatabase(this)
         sessionStore = SessionStore(this)
-        repository = HomeRepository(LocalDatabase(this), ConnectivityObserver(this), api, sessionStore)
+        preferencesStore = PreferencesStore(database)
+        repository = HomeRepository(database, ConnectivityObserver(this), api, sessionStore, preferencesStore)
         pinVault = PinVault(this)
         activationManager = ActivationManager(this, api, sessionStore)
         reminderScheduler = ReminderScheduler(this)

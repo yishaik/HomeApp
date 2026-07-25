@@ -150,6 +150,18 @@ class SupabaseApi(
         }
     }
 
+    suspend fun deleteItem(itemId: String, session: AuthSession): Unit = withContext(Dispatchers.IO) {
+        val request = authenticatedRequestBuilder("/rest/v1/homeapp_items?id=eq.$itemId", session.accessToken)
+            .delete()
+            .build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val json = runCatching { JSONObject(response.body?.string().orEmpty()) }.getOrDefault(JSONObject())
+                throw apiError("Supabase", response.code, json)
+            }
+        }
+    }
+
     fun openRealtime(session: AuthSession, onChange: () -> Unit): WebSocket? {
         if (!configured) return null
         val wsUrl = baseUrl.replace("https://", "wss://").replace("http://", "ws://") +
