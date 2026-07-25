@@ -320,9 +320,12 @@ set search_path = public, pg_temp
 as $$
 begin
   if old.payload is distinct from new.payload then
+    -- Best-effort audit history: skip if this (item_id, revision) snapshot was already captured,
+    -- so a repeated/regressed client revision number can't 409 and block the actual item update.
     insert into public.homeapp_item_revisions(item_id, revision, actor_id, payload, changed_fields)
     values(old.id, old.revision, auth.uid(), old.payload,
-      jsonb_build_object('restored_from_revision', old.revision));
+      jsonb_build_object('previous_revision', old.revision))
+    on conflict (item_id, revision) do nothing;
   end if;
   new.updated_at := now();
   return new;
