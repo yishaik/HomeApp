@@ -219,6 +219,13 @@ using (exists (
     and i.household_id = ((select auth.jwt())->'app_metadata'->>'household_id')::uuid
 ));
 
+-- The BEFORE UPDATE trigger capture_item_revision() runs as the caller (SECURITY INVOKER) and
+-- inserts a history row here, so authenticated callers need an INSERT policy — without it every
+-- payload-changing UPDATE fails with "new row violates row-level security policy" (403).
+create policy homeapp_revisions_insert on public.homeapp_item_revisions
+for insert to authenticated
+with check (actor_id = (select auth.uid()));
+
 create policy homeapp_comments_select on public.homeapp_comments
 for select to authenticated
 using (exists (
