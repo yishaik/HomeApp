@@ -23,6 +23,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -224,7 +226,12 @@ private fun MainApp(app: HomeApplication, onLogout: () -> Unit) {
         return
     }
 
+    val syncError by app.repository.lastSyncError.collectAsStateWithLifecycle()
+    val snackbarHost = remember { SnackbarHostState() }
+    LaunchedEffect(syncError) { syncError?.let { snackbarHost.showSnackbar(it) } }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHost) },
         topBar = {
             Column {
                 if (!online) OfflineBanner()

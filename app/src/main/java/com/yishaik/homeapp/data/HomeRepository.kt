@@ -137,6 +137,25 @@ class HomeRepository(
         syncNow()
     }
 
+    // Items with local changes not yet confirmed pushed to the backend. Persisted across restarts
+    // so a change is never lost if a push fails (bad session, offline, server hiccup).
+    private fun pendingIds(): Set<String> =
+        database.getMetadata("pending_push")?.split(",")?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
+    private fun markPending(id: String) = database.setMetadata("pending_push", (pendingIds() + id).joinToString(","))
+    private fun clearPending(id: String) = database.setMetadata("pending_push", (pendingIds() - id).joinToString(","))
+
+    /** Best-effort push of every locally-changed item to the backend; clears the pending flag on success. */
+    suspend fun pushPending() {
+        if (!api.configured || !sessionStore.hasSession()) return
+        val byId = database.readItems().associateBy { it.id }
+        for (id in pendingIds()) {
+            val local = byId[id] ?: run { clearPending(id); continue }
+            runCatching { api.upsertItem(local, validSession()) }
+                .onSuccess { clearPending(id); _lastSyncError.value = null }
+                .onFailure { _lastSyncError.value = it.message ?: "Sync pending" }
+        }
+    }
+
     suspend fun syncNow(): Result<Unit> = withContext(Dispatchers.IO) {
         if (!api.configured || !_online.value || !sessionStore.hasSession()) return@withContext Result.success(Unit)
         runCatching {
@@ -146,8 +165,14 @@ class HomeRepository(
                     val session = validSession()
                     val remoteUsers = api.fetchProfiles(session)
                     val remoteItems = api.fetchItems(session)
-                    database.replaceAll(remoteItems)
-                    _items.value = remoteItems.filter { it.status != ItemStatus.CANCELLED }.sortedBy { it.updatedAt }
+                    // Merge: keep local (unsynced) versions of pending items so a background push can
+                    // still deliver them; everything else takes the remote copy. This stops sync from
+                    // resurrecting a locally-deleted item or clobbering a local edit.
+                    val pending = pendingIds()
+                    val localById = database.readItems().associateBy { it.id }
+                    val merged = remoteItems.filter { it.id !in pending } + pending.mapNotNull { localById[it] }
+                    database.replaceAll(merged)
+                    _items.value = merged.filter { it.status != ItemStatus.CANCELLED }.sortedBy { it.updatedAt }
                     _users.value = remoteUsers.associateBy { it.id }.ifEmpty { mapOf(session.userId to session.user()) }
                     _currentUser.value = _users.value[session.userId] ?: session.user()
                     _lastSyncError.value = null
@@ -156,27 +181,33 @@ class HomeRepository(
                     _syncing.value = false
                 }
             }
+            pushPending()
         }.onFailure { _lastSyncError.value = it.message ?: "Sync failed" }
     }
 
     suspend fun save(item: HomeItem): Result<HomeItem> = withContext(Dispatchers.IO) {
-        // We attempt the write and let the actual network call be the source of truth, rather than
-        // pre-blocking on a transient connectivity flag (which previously stopped every edit from
-        // ever reaching the backend). A genuinely offline call fails fast and surfaces the error.
+        // Local-first: persist the change to the device immediately (so it survives a restart and
+        // shows instantly), then push to the backend in the background. A failed push keeps the item
+        // flagged pending and is retried on the next sync — the change is never silently lost.
         runCatching {
             val now = Instant.now()
             val session = sessionStore.load()
             val normalized = item.copy(
-                householdId = session?.householdId ?: item.householdId,
+                householdId = session?.householdId?.takeIf { it.isNotBlank() } ?: item.householdId,
                 creatorId = item.creatorId.takeIf { it.isNotBlank() && it != "u1" && it != "u2" }
                     ?: session?.userId ?: item.creatorId,
                 revision = item.revision + 1,
                 updatedAt = now,
             )
-            val saved = if (api.configured && session != null) api.upsertItem(normalized, validSession()) else normalized
-            database.upsert(saved)
-            _items.value = (_items.value.filterNot { it.id == saved.id } + saved).filter { it.status != ItemStatus.CANCELLED }.sortedBy { it.updatedAt }
-            _lastSyncError.value = null
+            database.upsert(normalized)
+            markPending(normalized.id)
+            _items.value = (_items.value.filterNot { it.id == normalized.id } + normalized).filter { it.status != ItemStatus.CANCELLED }.sortedBy { it.updatedAt }
+            if (api.configured && session != null) {
+                runCatching { api.upsertItem(normalized, validSession()) }
+                    .onSuccess { clearPending(normalized.id); _lastSyncError.value = null }
+                    .onFailure { _lastSyncError.value = it.message ?: "Save queued (will retry)" }
+            } else clearPending(normalized.id)
+            val saved = normalized
             saved
         }.onFailure { _lastSyncError.value = it.message ?: "Save failed" }
     }

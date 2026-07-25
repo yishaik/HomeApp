@@ -367,7 +367,15 @@ fun SettingsScreen(
                 HorizontalDivider()
             }
             item { SettingRow(Icons.Default.Lock, "נעילה ב־PIN", if (hasPin) "פעיל" else "כבוי") { dialog = SettingsDialog.PIN } }
-            item { HorizontalDivider(); Spacer(Modifier.height(12.dp)) }
+            item { HorizontalDivider() }
+            item {
+                ListItem(
+                    leadingContent = { Icon(Icons.Default.Info, null) },
+                    headlineContent = { Text("גרסה ${com.yishaik.homeapp.BuildConfig.VERSION_NAME} (${com.yishaik.homeapp.BuildConfig.VERSION_CODE})") },
+                    supportingContent = { Text("מחובר כ־${currentUser.displayName} · ${if (com.yishaik.homeapp.BuildConfig.SUPABASE_URL.isNotBlank()) "ענן" else "מקומי"}") },
+                )
+                HorizontalDivider(); Spacer(Modifier.height(12.dp))
+            }
             item {
                 ListItem(
                     modifier = Modifier.clickable { showLogout = true },
