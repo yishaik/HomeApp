@@ -139,7 +139,7 @@ fun NotificationsScreen(onBack: () -> Unit, onOpenItem: (String) -> Unit) {
     ) }
     Scaffold(topBar = { TopAppBar(title = { Text("התראות") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }, actions = { TextButton(onClick = {}) { Text("סמן הכול") } }) }) { padding ->
         LazyColumn(Modifier.padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            lazyItems(notifications.size) { index -> val n = notifications[index]; Card(Modifier.fillMaxWidth().clickable { onOpenItem(n.third) }) { ListItem(headlineContent = { Text(n.first, fontWeight = FontWeight.Bold) }, supportingContent = { Text(n.second) }, leadingContent = { Icon(Icons.Default.Notifications, null) }) } }
+            items(notifications.size) { index -> val n = notifications[index]; Card(Modifier.fillMaxWidth().clickable { onOpenItem(n.third) }) { ListItem(headlineContent = { Text(n.first, fontWeight = FontWeight.Bold) }, supportingContent = { Text(n.second) }, leadingContent = { Icon(Icons.Default.Notifications, null) }) } }
         }
     }
 }
@@ -158,7 +158,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 "שכבות לוח שנה" to "חגים, עברי וחופשות", "גיבוי" to "יומי · 30 ימים",
                 "ייצוא" to "JSON, CSV, ICS ו־PDF"
             )
-            lazyItems(rows.size) { i -> val row = rows[i]; ListItem(headlineContent = { Text(row.first) }, supportingContent = { Text(row.second) }, trailingContent = { Icon(Icons.Default.ChevronLeft, null) }); HorizontalDivider() }
+            items(rows.size) { i -> val row = rows[i]; ListItem(headlineContent = { Text(row.first) }, supportingContent = { Text(row.second) }, trailingContent = { Icon(Icons.Default.ChevronLeft, null) }); HorizontalDivider() }
         }
     }
 }

@@ -20,6 +20,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yishaik.homeapp.domain.*
+import com.yishaik.homeapp.domain.hebrew.HebrewCalendarProvider
+import com.yishaik.homeapp.domain.hebrew.HolidayOrVacation
 import com.yishaik.homeapp.ui.components.*
 import com.yishaik.homeapp.ui.theme.*
 import com.yishaik.homeapp.util.NaturalLanguageParser
@@ -42,6 +44,7 @@ fun TodayScreen(items: List<HomeItem>, users: Map<String, AppUser>, currentUser:
         .sortedBy { it.startAt ?: it.dueAt }
     val completed = visible.filter { it.status == ItemStatus.COMPLETED && it.updatedAt.atZone(ZoneId.systemDefault()).toLocalDate() == date }
     val readNotes = visible.filter { it.type == ItemType.NOTE && it.readReceipts.firstOrNull { r -> r.userId == currentUser.id }?.readAt != null }
+    val holidayEntries = remember(date) { HebrewCalendarProvider.entriesOn(date) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
@@ -52,6 +55,13 @@ fun TodayScreen(items: List<HomeItem>, users: Map<String, AppUser>, currentUser:
                     Text(date.format(DateTimeFormatter.ofPattern("d MMMM yyyy", Locale("he"))), style = MaterialTheme.typography.bodySmall)
                 }
                 IconButton(onClick = { date = date.plusDays(1) }) { Icon(Icons.Default.ChevronRight, null) }
+            }
+        }
+        if (holidayEntries.isNotEmpty()) {
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    holidayEntries.forEach { HolidayChip(it) }
+                }
             }
         }
         if (newNotes.isNotEmpty()) {
@@ -120,7 +130,7 @@ private fun DayCalendar(items: List<HomeItem>, users: Map<String, AppUser>, onOp
 private fun WeekCalendar(items: List<HomeItem>, users: Map<String, AppUser>, onOpenItem: (HomeItem) -> Unit) {
     val start = LocalDate.now().with(java.time.temporal.TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY))
     LazyRow(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        lazyItems(7) { offset ->
+        items(7) { offset ->
             val date = start.plusDays(offset.toLong())
             val dayItems = items.filter { it.dateIn(ZoneId.systemDefault()) == date && it.status != ItemStatus.ARCHIVED }
             Card(Modifier.width(250.dp).fillParentMaxHeight()) {
@@ -148,10 +158,18 @@ private fun MonthCalendar(items: List<HomeItem>, onOpenItem: (HomeItem) -> Unit)
                     val day = row * 7 + col - leading + 1
                     val date = if (day in 1..month.lengthOfMonth()) month.atDay(day) else null
                     val dayItems = date?.let { d -> items.filter { it.dateIn(ZoneId.systemDefault()) == d && it.status != ItemStatus.ARCHIVED } }.orEmpty()
+                    val holidays = date?.let { d -> HebrewCalendarProvider.entriesOn(d) }.orEmpty()
                     Card(Modifier.weight(1f).height(82.dp).padding(2.dp).clickable { dayItems.firstOrNull()?.let(onOpenItem) }) {
                         Column(Modifier.padding(5.dp)) {
                             Text(date?.dayOfMonth?.toString().orEmpty(), style = MaterialTheme.typography.labelMedium)
-                            dayItems.take(3).forEach { item -> Box(Modifier.fillMaxWidth().padding(top = 3.dp).height(7.dp).clip(RoundedCornerShape(4.dp)).background(itemColor(item.type))) }
+                            holidays.take(1).forEach { holiday ->
+                                Text(
+                                    holiday.title, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp).clip(RoundedCornerShape(4.dp)).background(MaterialTheme.colorScheme.tertiaryContainer).padding(horizontal = 3.dp),
+                                )
+                            }
+                            dayItems.take(if (holidays.isEmpty()) 3 else 2).forEach { item -> Box(Modifier.fillMaxWidth().padding(top = 3.dp).height(7.dp).clip(RoundedCornerShape(4.dp)).background(itemColor(item.type))) }
                         }
                     }
                 }
@@ -163,7 +181,7 @@ private fun MonthCalendar(items: List<HomeItem>, onOpenItem: (HomeItem) -> Unit)
 @Composable
 private fun YearCalendar(items: List<HomeItem>) {
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        lazyItems(12) { index ->
+        items(12) { index ->
             val month = YearMonth.of(LocalDate.now().year, index + 1)
             val count = items.count { it.dateIn(ZoneId.systemDefault())?.let(YearMonth::from) == month && it.status != ItemStatus.ARCHIVED }
             Card(Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -175,6 +193,24 @@ private fun YearCalendar(items: List<HomeItem>) {
     }
 }
 
+
+// Read-only overlay chip for Israeli holidays / school vacations. Never clickable, never persisted.
+@Composable
+private fun HolidayChip(entry: HolidayOrVacation, modifier: Modifier = Modifier) {
+    val vacation = entry.type == "vacation"
+    Surface(
+        modifier,
+        shape = RoundedCornerShape(10.dp),
+        color = if (vacation) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = if (vacation) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onTertiaryContainer,
+    ) {
+        Row(Modifier.padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (vacation) Icons.Default.BeachAccess else Icons.Default.Celebration, null, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(5.dp))
+            Text(entry.title, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
 
 @Composable
 private fun EmptyState(text: String) = Card(Modifier.fillMaxWidth()) { Text(text, Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }

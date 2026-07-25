@@ -43,7 +43,7 @@ class LocalDatabase(context: Context) : SQLiteOpenHelper(context, "homeapp.db", 
     }
 }
 
-private inline fun SQLiteDatabase.transaction(block: () -> Unit) {
+private inline fun SQLiteDatabase.transaction(block: SQLiteDatabase.() -> Unit) {
     beginTransaction()
     try { block(); setTransactionSuccessful() } finally { endTransaction() }
 }

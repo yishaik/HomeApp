@@ -165,7 +165,7 @@ class SupabaseApi(
                             .put("event", "*")
                             .put("schema", "public")
                             .put("table", "homeapp_items")
-                            .put("filter", "household_id=eq.${session.householdId}"))
+                            .put("filter", "household_id=eq.${session.householdId}")))
                     val join = JSONObject()
                         .put("topic", "realtime:homeapp:${session.householdId}")
                         .put("event", "phx_join")

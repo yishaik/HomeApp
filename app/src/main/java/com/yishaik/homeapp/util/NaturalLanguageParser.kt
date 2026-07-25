@@ -10,15 +10,18 @@ import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
 
 object NaturalLanguageParser {
-    private val timeRegex = Regex("(?:ב[-־]?|at\\s*)?(\\d{1,2})(?::(\\d{2}))?", RegexOption.IGNORE_CASE)
+    private val timeRegex = Regex("(?:בשעה\\s*|ב[-־]?|at\\s*)?(\\d{1,2})(?::(\\d{2}))?", RegexOption.IGNORE_CASE)
+    private val taskHints = listOf("משימה", "תזכורת", "צריך", "להחזיר", "לקבוע", "להביא", "לסדר", "לשלוח", "todo", "task", "reminder")
+    private val listHints = listOf("רשימה", "קניות", "ציוד", "סרטים", "לחם", "חלב", "list")
+    private val eventHints = listOf("אירוע", "פגישה", "תור", "רופא", "שיעור", "פסנתר", "יום הולדת", "חופשה", "meeting", "appointment", "dentist")
 
     fun parse(text: String, now: LocalDateTime = LocalDateTime.now(), zoneId: ZoneId = ZoneId.systemDefault()): ParsedQuickAdd {
         val normalized = text.trim()
         val lower = normalized.lowercase()
         val type = when {
-            listOf("משימה", "צריך", "todo", "task").any(lower::contains) -> ItemType.TASK
-            listOf("רשימה", "list").any(lower::contains) -> ItemType.LIST
-            listOf("אירוע", "פגישה", "תור", "רופא", "meeting", "appointment", "dentist").any(lower::contains) -> ItemType.EVENT
+            taskHints.any(lower::contains) -> ItemType.TASK
+            listHints.any(lower::contains) -> ItemType.LIST
+            eventHints.any(lower::contains) -> ItemType.EVENT
             else -> ItemType.NOTE
         }
         val date = parseDate(lower, now.toLocalDate())
@@ -30,8 +33,8 @@ object NaturalLanguageParser {
             else -> null
         }
         val cleaned = normalized
-            .replace(Regex("(?i)\\b(today|tomorrow|next\\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)|at)\\b"), "")
-            .replace(Regex("היום|מחר|ביום\\s+(ראשון|שני|שלישי|רביעי|חמישי|שישי|שבת)|ב[-־]?\\d{1,2}(?::\\d{2})?"), "")
+            .replace(Regex("(?i)\\b(today|tomorrow|in two days|next\\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)|at)\\b"), "")
+            .replace(Regex("מחרתיים|מחר|היום|ב?יום\\s+(ראשון|שני|שלישי|רביעי|חמישי|שישי|שבת)|בשעה\\s*\\d{1,2}(?::\\d{2})?|ב[-־]?\\d{1,2}(?::\\d{2})?|בבוקר|בצהריים|בערב"), "")
             .replace(Regex("\\s+"), " ")
             .trim(' ', '-', '־')
             .ifBlank { normalized }
@@ -44,6 +47,7 @@ object NaturalLanguageParser {
     }
 
     private fun parseDate(text: String, today: LocalDate): LocalDate? = when {
+        "מחרתיים" in text || "in two days" in text || "day after tomorrow" in text -> today.plusDays(2)
         "מחר" in text || "tomorrow" in text -> today.plusDays(1)
         "היום" in text || "today" in text -> today
         else -> parseWeekday(text, today)
@@ -64,9 +68,17 @@ object NaturalLanguageParser {
     }
 
     private fun parseTime(text: String): LocalTime? {
-        val match = timeRegex.findAll(text).lastOrNull() ?: return null
-        val hour = match.groupValues[1].toIntOrNull() ?: return null
-        val minute = match.groupValues.getOrNull(2)?.toIntOrNull() ?: 0
-        return if (hour in 0..23 && minute in 0..59) LocalTime.of(hour, minute) else null
+        val match = timeRegex.findAll(text).lastOrNull()
+        if (match != null) {
+            val hour = match.groupValues[1].toIntOrNull()
+            val minute = match.groupValues.getOrNull(2)?.toIntOrNull() ?: 0
+            if (hour != null && hour in 0..23 && minute in 0..59) return LocalTime.of(hour, minute)
+        }
+        return when {
+            "בבוקר" in text || "morning" in text -> LocalTime.of(9, 0)
+            "בצהריים" in text || "noon" in text -> LocalTime.of(12, 0)
+            "בערב" in text || "evening" in text -> LocalTime.of(19, 0)
+            else -> null
+        }
     }
 }
