@@ -2,7 +2,13 @@ name: Build production HomeApp APK
 
 on:
   push:
-    branches: ["feature/production-supabase"]
+    branches:
+      - main
+      - "feature/**"
+      - "ci/**"
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
