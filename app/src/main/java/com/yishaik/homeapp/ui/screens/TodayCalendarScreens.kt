@@ -33,7 +33,7 @@ import java.util.Locale
 import java.util.UUID
 
 @Composable
-fun TodayScreen(items: List<HomeItem>, users: Map<String, AppUser>, currentUser: AppUser, onOpenItem: (HomeItem) -> Unit) {
+fun TodayScreen(items: List<HomeItem>, users: Map<String, AppUser>, currentUser: AppUser, onOpenItem: (HomeItem) -> Unit, onQuickAction: (HomeItem, ItemQuickAction) -> Unit = { _, _ -> }) {
     var date by remember { mutableStateOf(LocalDate.now()) }
     val now = Instant.now()
     val visible = items.filter { it.status != ItemStatus.ARCHIVED && it.isVisibleTo(currentUser.id, now) }
@@ -66,31 +66,31 @@ fun TodayScreen(items: List<HomeItem>, users: Map<String, AppUser>, currentUser:
         }
         if (newNotes.isNotEmpty()) {
             item { SectionHeader("פתקים חדשים ומוצמדים", newNotes.size) }
-            lazyItems(newNotes.sortedByDescending { it.pinned }) { ItemCard(it, users, { onOpenItem(it) }) }
+            lazyItems(newNotes.sortedByDescending { it.pinned }) { ItemCard(it, users, { onOpenItem(it) }, onQuickAction = { action -> onQuickAction(it, action) }) }
         }
         if (allDay.isNotEmpty()) {
             item { SectionHeader("כל היום") }
-            lazyItems(allDay) { ItemCard(it, users, { onOpenItem(it) }) }
+            lazyItems(allDay) { ItemCard(it, users, { onOpenItem(it) }, onQuickAction = { action -> onQuickAction(it, action) }) }
         }
         if (unscheduled.isNotEmpty()) {
             item { SectionHeader("ללא שעה ובאיחור", unscheduled.size) }
-            lazyItems(unscheduled) { ItemCard(it, users, { onOpenItem(it) }) }
+            lazyItems(unscheduled.sortedByDescending { it.pinned }) { ItemCard(it, users, { onOpenItem(it) }, onQuickAction = { action -> onQuickAction(it, action) }) }
         }
         item { SectionHeader("ציר הזמן") }
         if (timeline.isEmpty()) item { EmptyState("אין פריטים מתוזמנים ביום הזה") }
         lazyItems(timeline) { item ->
             Row(verticalAlignment = Alignment.Top) {
                 Text((item.startAt ?: item.dueAt)?.atZone(ZoneId.systemDefault())?.format(DateTimeFormatter.ofPattern("HH:mm")) ?: "", modifier = Modifier.width(52.dp), style = MaterialTheme.typography.labelMedium)
-                ItemCard(item, users, { onOpenItem(item) }, Modifier.weight(1f))
+                ItemCard(item, users, { onOpenItem(item) }, Modifier.weight(1f), onQuickAction = { action -> onQuickAction(item, action) })
             }
         }
         if (completed.isNotEmpty()) {
             item { SectionHeader("הושלמו היום", completed.size) }
-            lazyItems(completed) { ItemCard(it, users, { onOpenItem(it) }) }
+            lazyItems(completed) { ItemCard(it, users, { onOpenItem(it) }, onQuickAction = { action -> onQuickAction(it, action) }) }
         }
         if (readNotes.isNotEmpty()) {
             item { SectionHeader("פתקים שנקראו") }
-            lazyItems(readNotes.take(4)) { ItemCard(it, users, { onOpenItem(it) }) }
+            lazyItems(readNotes.take(4)) { ItemCard(it, users, { onOpenItem(it) }, onQuickAction = { action -> onQuickAction(it, action) }) }
         }
         item { Spacer(Modifier.height(72.dp)) }
     }

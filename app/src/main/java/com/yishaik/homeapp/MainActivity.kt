@@ -20,7 +20,7 @@ class MainActivity : ComponentActivity() {
         val app = application as HomeApplication
         setContent {
             val preferences by app.preferencesStore.prefs.collectAsStateWithLifecycle()
-            HomeAppTheme(accentArgb = preferences.accentArgb) { HomeAppRoot(app) }
+            HomeAppTheme(accentArgb = preferences.accentArgb, rtl = preferences.localeTag != "en") { HomeAppRoot(app) }
         }
     }
 }

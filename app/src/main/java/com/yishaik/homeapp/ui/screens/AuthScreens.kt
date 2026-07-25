@@ -43,7 +43,7 @@ fun ActivationScreen(
     var recoveryCode by remember { mutableStateOf("") }
     var showRecovery by remember { mutableStateOf(false) }
 
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.primaryContainer) {
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
             Modifier.fillMaxSize().padding(28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,

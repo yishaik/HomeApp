@@ -44,8 +44,11 @@ fun QuickAddSheet(
     onSave: (HomeItem) -> Unit,
 ) {
     var text by remember { mutableStateOf("") }
+    var listTitle by remember { mutableStateOf("") }
+    var listItems by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf(ItemType.NOTE) }
     var notify by remember { mutableStateOf(false) }
+    var pinned by remember { mutableStateOf(false) }
     var reminderMinutes by remember { mutableStateOf<Int?>(null) }
     var pickedDateTime by remember { mutableStateOf<Instant?>(null) }
     var location by remember { mutableStateOf("") }
@@ -68,11 +71,22 @@ fun QuickAddSheet(
         Column(Modifier.fillMaxWidth().padding(20.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("הוספה מהירה", style = MaterialTheme.typography.headlineSmall)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { lazyItems(ItemType.entries) { type -> FilterChip(selectedType == type, { selectedType = type }, label = { Text(when(type) { ItemType.NOTE -> "פתק"; ItemType.EVENT -> "אירוע"; ItemType.TASK -> "משימה"; ItemType.LIST -> "רשימה" }) }, leadingIcon = { Icon(itemIcon(type), null) }) } }
-            OutlinedTextField(
-                text, { text = it }, modifier = Modifier.fillMaxWidth(), minLines = if (isList || isNote) 3 else 2,
-                label = { Text(when { isList -> "כותרת הרשימה"; isNote -> "תוכן הפתק"; else -> "כותרת" }) },
-                placeholder = { Text(when { isList -> "שורה ראשונה = כותרת, כל שורה נוספת = פריט"; isNote -> "מה תרצה לזכור?"; else -> "למשל: רופא שיניים מחר ב־16:00" }) },
-            )
+            if (isList) {
+                OutlinedTextField(
+                    listTitle, { listTitle = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text("כותרת הרשימה") }, placeholder = { Text("למשל: קניות לשבת") },
+                )
+                OutlinedTextField(
+                    listItems, { listItems = it }, modifier = Modifier.fillMaxWidth(), minLines = 3,
+                    label = { Text("פריטים") }, placeholder = { Text("פריט בכל שורה") },
+                )
+            } else {
+                OutlinedTextField(
+                    text, { text = it }, modifier = Modifier.fillMaxWidth(), minLines = if (isNote) 3 else 2,
+                    label = { Text(if (isNote) "תוכן הפתק" else "כותרת") },
+                    placeholder = { Text(if (isNote) "מה תרצה לזכור?" else "למשל: רופא שיניים מחר ב־16:00") },
+                )
+            }
             if (text.isNotBlank() && !isList && !isNote && (nlInstant != null || parsed.needsAiFallback)) Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) { Column(Modifier.padding(14.dp)) {
                 Text("תצוגה מקדימה", fontWeight = FontWeight.Bold); Text(parsed.title)
                 parsed.dateTime?.let { Text(it.format(fmt)) }
@@ -101,19 +115,23 @@ fun QuickAddSheet(
                 } }
             }
             Row(verticalAlignment = Alignment.CenterVertically) { Switch(notify, { notify = it }); Spacer(Modifier.width(8.dp)); Text("הודע למשתמש השני") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconToggleButton(pinned, { pinned = it }) { Icon(Icons.Default.PushPin, null, tint = if (pinned) NoteColor else LocalContentColor.current) }
+                Text("הצמדה")
+            }
+            val canSave = if (isList) listTitle.isNotBlank() else text.isNotBlank()
             Button(
                 onClick = {
                     val type = effectiveType
                     val instant = effectiveInstant
-                    val lines = text.lines().map(String::trim).filter { it.isNotBlank() }
                     val reminders = if (showReminder && activeReminder >= 0) listOf(Reminder(minutesBefore = activeReminder, userId = currentUser.id)) else emptyList()
-                    val checklist = if (type == ItemType.LIST) lines.drop(1).mapIndexed { i, line -> ChecklistEntry(title = line, orderIndex = i) } else emptyList()
+                    val checklist = if (type == ItemType.LIST) listItems.lines().map(String::trim).filter { it.isNotBlank() }.mapIndexed { i, line -> ChecklistEntry(title = line, orderIndex = i) } else emptyList()
                     val resolvedAssignee = when {
                         type == ItemType.EVENT || type == ItemType.TASK ->
                             assignee.takeIf { it != Assignee.NONE } ?: if (currentUser.id == "u1") Assignee.USER_ONE else Assignee.USER_TWO
                         else -> Assignee.NONE
                     }
-                    val title = when { type == ItemType.LIST -> lines.firstOrNull().orEmpty().ifBlank { "רשימה" }; else -> parsed.title.ifBlank { text.trim() } }
+                    val title = when { type == ItemType.LIST -> listTitle.trim().ifBlank { "רשימה" }; else -> parsed.title.ifBlank { text.trim() } }
                     onSave(HomeItem(
                         id = UUID.randomUUID().toString(), type = type, title = title, body = if (type == ItemType.NOTE) text.trim() else "",
                         creatorId = currentUser.id, assignee = resolvedAssignee,
@@ -123,11 +141,12 @@ fun QuickAddSheet(
                         locationLabel = if (type == ItemType.EVENT) location.trim().ifBlank { null } else null,
                         reminders = reminders,
                         checklist = checklist,
+                        pinned = pinned,
                         notifyOtherUser = notify,
                         readReceipts = if (type == ItemType.NOTE) listOf(ReadReceipt("u1", null), ReadReceipt("u2", null)) else emptyList(),
                     ))
                 },
-                enabled = online && text.isNotBlank(), modifier = Modifier.fillMaxWidth()
+                enabled = online && canSave, modifier = Modifier.fillMaxWidth()
             ) { Text(if (online) "שמירה" else "לא ניתן לערוך במצב לא מקוון") }
             Spacer(Modifier.height(20.dp))
         }

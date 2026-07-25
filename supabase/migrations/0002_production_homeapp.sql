@@ -188,9 +188,19 @@ for all to authenticated
 using ((select auth.uid()) = profile_id)
 with check ((select auth.uid()) = profile_id);
 
+-- Household-scoped read, but a member's scheduled note stays private until its publish time:
+-- other members cannot see a NOTE whose scheduledPublishAt is still in the future.
 create policy homeapp_items_select on public.homeapp_items
 for select to authenticated
-using (household_id = ((select auth.jwt())->'app_metadata'->>'household_id')::uuid);
+using (
+  household_id = ((select auth.jwt())->'app_metadata'->>'household_id')::uuid
+  and not (
+    type = 'NOTE'
+    and creator_id <> (select auth.uid())
+    and (payload->>'scheduledPublishAt') is not null
+    and (payload->>'scheduledPublishAt')::timestamptz > now()
+  )
+);
 create policy homeapp_items_insert on public.homeapp_items
 for insert to authenticated
 with check (
@@ -383,6 +393,15 @@ grant usage, select on all sequences in schema public to authenticated;
 insert into public.homeapp_households(id, name)
 values ('a7b5b901-af73-492a-83e6-a8bebee532dc', 'הבית שלנו');
 
+-- Activation slots (the two household members). SECURITY: never commit real activation- or
+-- recovery-code hashes to source control. Provision them out-of-band after deploying this
+-- migration, e.g.:
+--   update public.homeapp_activation_slots
+--     set code_hash = encode(digest('<the-6-digit-code>','sha256'),'hex'),
+--         recovery_code_hash = encode(digest('<the-recovery-code>','sha256'),'hex')
+--     where slot_name = 'user_one';
+-- The placeholder hashes below are non-secret sentinels that match no real code, so a freshly
+-- deployed database has no usable activation code until you set real ones.
 insert into public.homeapp_activation_slots(
   id, household_id, slot_name, email, display_name, avatar, accent_argb,
   code_hash, recovery_code_hash
@@ -391,15 +410,15 @@ insert into public.homeapp_activation_slots(
   'de5431e6-313a-4212-8efa-f79bbcfb9110',
   'a7b5b901-af73-492a-83e6-a8bebee532dc',
   'user_one', 'homeapp-yishai@local.invalid', 'ישי', 'י', 4284111831,
-  '19e334d55da0153866b3f051f38c6f6de1ce25e4d74505e7b9b41ea58eb626c3',
-  'd57a68f01e9cc90ed4390b68a81939756c3a35e8f01909c432501df4f34181ff'
+  '0000000000000000000000000000000000000000000000000000000000000000',
+  '0000000000000000000000000000000000000000000000000000000000000001'
 ),
 (
   '1ade25cc-8d10-47c7-85ab-2dfdb413e411',
   'a7b5b901-af73-492a-83e6-a8bebee532dc',
   'user_two', 'homeapp-maayan@local.invalid', 'מעיין', 'מ', 4292897435,
-  'e9d250257d106447f519977d81cdb0a205e8c76c51e93a645d1fba2b84a686bf',
-  'f0bb47002ccd1464694b3858c353b53986900cc2c3ba9f9734e77a405affac07'
+  '0000000000000000000000000000000000000000000000000000000000000002',
+  '0000000000000000000000000000000000000000000000000000000000000003'
 );
 
 -- Add selected tables to Realtime only once.

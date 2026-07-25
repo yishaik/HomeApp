@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Monochrome layer for Android 13+ themed ("Material You") icons.
+    Single-colour silhouette (system tints it); the heart is an evenOdd hole.
+    Same geometry and safe zone as ic_launcher_foreground.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M54,29.5
+            C55.35,29.5 56.66,29.98 57.69,30.86
+            L79.19,49.16
+            C80.68,50.43 81.5,52.3 81.5,54.26
+            L81.5,74.5
+            C81.5,77.81 78.81,80.5 75.5,80.5
+            L32.5,80.5
+            C29.19,80.5 26.5,77.81 26.5,74.5
+            L26.5,54.26
+            C26.5,52.3 27.32,50.43 28.81,49.16
+            L50.31,30.86
+            C51.34,29.98 52.65,29.5 54,29.5 Z
+            M54,70.5
+            L63.6,60.9
+            C66.13,58.37 66.13,54.26 63.6,51.73
+            C61.07,49.2 56.96,49.2 54.43,51.73
+            L54,52.16
+            L53.57,51.73
+            C51.04,49.2 46.93,49.2 44.4,51.73
+            C41.87,54.26 41.87,58.37 44.4,60.9
+            L54,70.5 Z" />
+</vector>

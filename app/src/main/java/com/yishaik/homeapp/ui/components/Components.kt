@@ -1,7 +1,9 @@
 package com.yishaik.homeapp.ui.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -10,6 +12,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -22,6 +28,9 @@ import com.yishaik.homeapp.ui.theme.*
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+
+/** Quick actions available from an item card's long-press menu. */
+enum class ItemQuickAction { TOGGLE_PIN, ARCHIVE, DELETE, COMPLETE }
 
 @Composable
 fun OfflineBanner() {
@@ -56,8 +65,15 @@ fun itemIcon(type: ItemType): ImageVector = when (type) {
     ItemType.NOTE -> Icons.Default.StickyNote2
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ItemCard(item: HomeItem, users: Map<String, AppUser>, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun ItemCard(
+    item: HomeItem,
+    users: Map<String, AppUser>,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onQuickAction: ((ItemQuickAction) -> Unit)? = null,
+) {
     val color = itemColor(item.type)
     val date = item.startAt ?: item.dueAt ?: item.scheduledPublishAt
     val meta = buildString {
@@ -67,8 +83,14 @@ fun ItemCard(item: HomeItem, users: Map<String, AppUser>, onClick: () -> Unit, m
             append(when (item.assignee) { Assignee.USER_ONE -> "ישי"; Assignee.USER_TWO -> "מעיין"; Assignee.BOTH -> "שנינו"; else -> "" })
         }
     }
+    var menuOpen by remember { mutableStateOf(false) }
+    val cardModifier = if (onQuickAction != null) {
+        modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = { menuOpen = true })
+    } else {
+        modifier.fillMaxWidth().clickable(onClick = onClick)
+    }
     ElevatedCard(
-        modifier.fillMaxWidth().clickable(onClick = onClick),
+        cardModifier,
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
@@ -87,7 +109,40 @@ fun ItemCard(item: HomeItem, users: Map<String, AppUser>, onClick: () -> Unit, m
                     if (meta.isNotBlank()) Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (item.status != ItemStatus.ACTIVE) Text(item.status.name.lowercase().replaceFirstChar { it.titlecase() }, color = color, style = MaterialTheme.typography.labelSmall)
                 }
-                if (item.pinned) Icon(Icons.Default.PushPin, null, tint = NoteColor)
+                if (item.comments.isNotEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable(onClick = onClick).padding(horizontal = 4.dp)) {
+                        Icon(Icons.Default.ChatBubbleOutline, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(2.dp))
+                        Text(item.comments.size.toString(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                if (item.pinned) Icon(Icons.Default.PushPin, null, tint = NoteColor, modifier = Modifier.size(18.dp))
+                if (onQuickAction != null) {
+                    DropdownMenu(menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text(if (item.pinned) "ביטול נעיצה" else "נעיצה") },
+                            onClick = { menuOpen = false; onQuickAction(ItemQuickAction.TOGGLE_PIN) },
+                            leadingIcon = { Icon(Icons.Default.PushPin, null) },
+                        )
+                        if ((item.type == ItemType.TASK || item.type == ItemType.LIST) && item.status == ItemStatus.ACTIVE) {
+                            DropdownMenuItem(
+                                text = { Text("סמן כהושלם") },
+                                onClick = { menuOpen = false; onQuickAction(ItemQuickAction.COMPLETE) },
+                                leadingIcon = { Icon(Icons.Default.Done, null) },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("ארכוב") },
+                            onClick = { menuOpen = false; onQuickAction(ItemQuickAction.ARCHIVE) },
+                            leadingIcon = { Icon(Icons.Default.Archive, null) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("מחיקה") },
+                            onClick = { menuOpen = false; onQuickAction(ItemQuickAction.DELETE) },
+                            leadingIcon = { Icon(Icons.Default.Delete, null) },
+                        )
+                    }
+                }
             }
         }
     }

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Adaptive icon foreground layer.
+    A clean, rounded house with a heart in its center = shared family home.
+    White house on transparent; the heart is punched out in the accent colour.
+    Drawn inside the ~66dp central safe zone of the 108x108 adaptive viewport
+    (content kept within x/y 26..82).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- House body + roof as a single rounded outline (white fill). -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,29.5
+            C55.35,29.5 56.66,29.98 57.69,30.86
+            L79.19,49.16
+            C80.68,50.43 81.5,52.3 81.5,54.26
+            L81.5,74.5
+            C81.5,77.81 78.81,80.5 75.5,80.5
+            L32.5,80.5
+            C29.19,80.5 26.5,77.81 26.5,74.5
+            L26.5,54.26
+            C26.5,52.3 27.32,50.43 28.81,49.16
+            L50.31,30.86
+            C51.34,29.98 52.65,29.5 54,29.5 Z" />
+
+    <!-- Heart cut into the house, filled with the accent purple so it reads
+         as negative space against the white house. Symmetric about x=54. -->
+    <path
+        android:fillColor="#FF5A5BD7"
+        android:pathData="M54,70.5
+            L44.4,60.9
+            C41.87,58.37 41.87,54.26 44.4,51.73
+            C46.93,49.2 51.04,49.2 53.57,51.73
+            L54,52.16
+            L54.43,51.73
+            C56.96,49.2 61.07,49.2 63.6,51.73
+            C66.13,54.26 66.13,58.37 63.6,60.9
+            L54,70.5 Z" />
+</vector>

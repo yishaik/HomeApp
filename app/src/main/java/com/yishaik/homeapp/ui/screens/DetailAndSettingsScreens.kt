@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -62,8 +64,10 @@ fun ItemDetailScreen(
     var showMenu by remember { mutableStateOf(false) }
     var showDelete by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
+    var showPolicy by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    val editable = item.editPolicy == EditPolicy.SHARED_EDIT || item.creatorId == currentUser.id
+    val isCreator = item.creatorId == currentUser.id
+    val editable = item.editPolicy == EditPolicy.SHARED_EDIT || isCreator
     val hasDateField = item.type == ItemType.EVENT || item.type == ItemType.TASK
 
     if (item.type == ItemType.NOTE) LaunchedEffect(item.id) {
@@ -79,7 +83,7 @@ fun ItemDetailScreen(
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
             actions = {
                 if (editable) IconButton(onClick = { editing = !editing }) { Icon(if (editing) Icons.Default.Close else Icons.Default.Edit, null) }
-                IconButton(onClick = { onSave(item.copy(pinned = !item.pinned)) }, enabled = online) { Icon(Icons.Default.PushPin, null, tint = if (item.pinned) itemColor(item.type) else LocalContentColor.current) }
+                IconButton(onClick = { onSave(item.copy(pinned = !item.pinned)) }, enabled = online) { Icon(if (item.pinned) Icons.Filled.PushPin else Icons.Outlined.PushPin, null, tint = if (item.pinned) itemColor(item.type) else LocalContentColor.current) }
                 IconButton(onClick = { showMenu = true }, enabled = online) { Icon(Icons.Default.MoreVert, null) }
                 DropdownMenu(showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(text = { Text("העברה לארכיון") }, onClick = { showMenu = false; onArchive() }, leadingIcon = { Icon(Icons.Default.Archive, null) })
@@ -121,6 +125,27 @@ fun ItemDetailScreen(
                                 editing = false
                             }, modifier = Modifier.fillMaxWidth()) { Text("שמירה") }
                         } else {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val creator = users[item.creatorId]
+                                if (creator != null) {
+                                    UserAvatar(creator, size = 28)
+                                    Spacer(Modifier.width(8.dp))
+                                    Column {
+                                        Text("נוצר ע\"י", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(creator.displayName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                                Spacer(Modifier.weight(1f))
+                                IconButton(onClick = { showPolicy = true }) {
+                                    Icon(
+                                        if (item.editPolicy == EditPolicy.CREATOR_ONLY) Icons.Outlined.Lock else Icons.Default.Group,
+                                        contentDescription = "הרשאת עריכה",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(10.dp))
                             Text(item.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                             if (item.body.isNotBlank()) { Spacer(Modifier.height(12.dp)); Text(item.body) }
                             item.link?.let { LinkText(it, context) }
@@ -141,7 +166,6 @@ fun ItemDetailScreen(
                     }
                 }}
             }
-            if (item.type == ItemType.NOTE) item { ReadStatus(item, users) }
             if (item.type == ItemType.LIST || item.checklist.isNotEmpty()) {
                 item { Text("פריטים", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
                 lazyItems(item.checklist, key = { it.id }) { entry ->
@@ -187,6 +211,7 @@ fun ItemDetailScreen(
                 })
             }
             if (item.type == ItemType.TASK || item.type == ItemType.LIST) item { Button(onClick = onComplete, enabled = online && item.status == ItemStatus.ACTIVE, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Done, null); Spacer(Modifier.width(8.dp)); Text("סימון כהושלם") } }
+            if (item.type == ItemType.NOTE) item { ReadByRow(item, users) }
             item { Spacer(Modifier.height(32.dp)) }
         }
     }
@@ -206,6 +231,38 @@ fun ItemDetailScreen(
             onDismiss = { showDatePicker = false },
             onConfirm = { startAt = it; showDatePicker = false },
         )
+    }
+    if (showPolicy) {
+        if (isCreator) {
+            AlertDialog(
+                onDismissRequest = { showPolicy = false },
+                title = { Text("הרשאת עריכה") },
+                text = { Column {
+                    Row(Modifier.fillMaxWidth().clickable { onSave(item.copy(editPolicy = EditPolicy.SHARED_EDIT)); showPolicy = false }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(item.editPolicy == EditPolicy.SHARED_EDIT, { onSave(item.copy(editPolicy = EditPolicy.SHARED_EDIT)); showPolicy = false })
+                        Spacer(Modifier.width(8.dp)); Text("שניכם יכולים לערוך")
+                    }
+                    Row(Modifier.fillMaxWidth().clickable { onSave(item.copy(editPolicy = EditPolicy.CREATOR_ONLY)); showPolicy = false }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(item.editPolicy == EditPolicy.CREATOR_ONLY, { onSave(item.copy(editPolicy = EditPolicy.CREATOR_ONLY)); showPolicy = false })
+                        Spacer(Modifier.width(8.dp)); Text("רק היוצר יכול לערוך")
+                    }
+                } },
+                confirmButton = { TextButton(onClick = { showPolicy = false }) { Text("סגירה") } },
+            )
+        } else {
+            AlertDialog(
+                onDismissRequest = { showPolicy = false },
+                title = { Text("הרשאת עריכה") },
+                text = { Text(if (item.editPolicy == EditPolicy.CREATOR_ONLY) "רק היוצר יכול לערוך פריט זה." else "שניכם יכולים לערוך פריט זה.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        onSave(item.copy(comments = item.comments + Comment(authorId = currentUser.id, text = "ביקש/ה הרשאת עריכה")))
+                        showPolicy = false
+                    }) { Text("בקש הרשאה") }
+                },
+                dismissButton = { TextButton(onClick = { showPolicy = false }) { Text("ביטול") } },
+            )
+        }
     }
 }
 
@@ -259,8 +316,6 @@ internal fun DateTimePickerDialog(initial: Instant?, onDismiss: () -> Unit, onCo
 @Composable
 private fun Metadata(item: HomeItem, users: Map<String, AppUser>, context: android.content.Context) {
     Card { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        val owner = users[item.creatorId]
-        Row(verticalAlignment = Alignment.CenterVertically) { if (owner != null) UserAvatar(owner); Spacer(Modifier.width(8.dp)); Text("נוצר על ידי ${owner?.displayName ?: item.creatorId}") }
         val time = item.startAt ?: item.dueAt
         time?.let { Text(it.atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))) }
         if (item.tags.isNotEmpty()) Text("תגיות: ${item.tags.joinToString()}")
@@ -271,24 +326,18 @@ private fun Metadata(item: HomeItem, users: Map<String, AppUser>, context: andro
                 Spacer(Modifier.width(4.dp)); Text("מיקום: ${item.locationLabel}", color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline)
             }
         }
-        Text(if (item.editPolicy == EditPolicy.SHARED_EDIT) "שניכם יכולים לערוך" else "רק היוצר יכול לערוך")
         Text("גרסה ${item.revision}", style = MaterialTheme.typography.bodySmall)
     }}
 }
 
 @Composable
-private fun ReadStatus(item: HomeItem, users: Map<String, AppUser>) {
-    Card { Column(Modifier.padding(16.dp)) {
-        Text("סטטוס קריאה", fontWeight = FontWeight.Bold)
-        item.readReceipts.forEach { receipt ->
-            val user = users[receipt.userId]
-            Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (user != null) UserAvatar(user)
-                Spacer(Modifier.width(8.dp)); Text(user?.displayName ?: receipt.userId, modifier = Modifier.weight(1f))
-                Text(receipt.readAt?.atZone(ZoneId.systemDefault())?.format(DateTimeFormatter.ofPattern("HH:mm")) ?: "טרם נקרא", style = MaterialTheme.typography.bodySmall)
-            }
-        }
-    }}
+private fun ReadByRow(item: HomeItem, users: Map<String, AppUser>) {
+    val readers = item.readReceipts.filter { it.readAt != null }.mapNotNull { users[it.userId] }
+    if (readers.isEmpty()) return
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("נקרא ע\"י", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        readers.forEach { UserAvatar(it, size = 20) }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -346,7 +395,7 @@ fun SettingsScreen(
             item { SettingRow(Icons.Default.Home, "מסך פתיחה", landingLabel(preferences.startDestination)) { dialog = SettingsDialog.LANDING } }
             item { SettingRow(Icons.Default.Palette, "ערכת צבע אישית", accentLabel(preferences.accentArgb)) { dialog = SettingsDialog.ACCENT } }
             item { SettingRow(Icons.Default.Notifications, "תזכורות ברירת מחדל", "אירוע: ${preferences.defaultEventReminderMinutes.firstOrNull() ?: 0} דק' לפני") { dialog = SettingsDialog.REMINDER } }
-            item { SettingRow(Icons.Default.Language, "שפה", if (preferences.localeTag == "he") "עברית" else "לפי המכשיר") { dialog = SettingsDialog.LANGUAGE } }
+            item { SettingRow(Icons.Default.Language, "שפה / Language", if (preferences.localeTag == "en") "English (LTR)" else "עברית") { dialog = SettingsDialog.LANGUAGE } }
             item { HorizontalDivider() }
             item {
                 ListItem(
@@ -397,8 +446,8 @@ fun SettingsScreen(
         SettingsDialog.REMINDER -> ChoiceDialog("תזכורת ברירת מחדל לאירוע", reminderOptions.map { it.first }, reminderOptions.firstOrNull { it.second == (preferences.defaultEventReminderMinutes.firstOrNull() ?: 30) }?.first ?: "30 דק' לפני", onDismiss = { dialog = null }) { label ->
             reminderOptions.firstOrNull { it.first == label }?.let { opt -> onUpdatePreferences { it.copy(defaultEventReminderMinutes = listOf(opt.second)) } }; dialog = null
         }
-        SettingsDialog.LANGUAGE -> ChoiceDialog("שפה", listOf("לפי המכשיר", "עברית"), if (preferences.localeTag == "he") "עברית" else "לפי המכשיר", onDismiss = { dialog = null }) { label ->
-            onUpdatePreferences { it.copy(localeTag = if (label == "עברית") "he" else null) }; dialog = null
+        SettingsDialog.LANGUAGE -> ChoiceDialog("שפה / Language", listOf("עברית", "English (LTR)"), if (preferences.localeTag == "en") "English (LTR)" else "עברית", onDismiss = { dialog = null }) { label ->
+            onUpdatePreferences { it.copy(localeTag = if (label.startsWith("English")) "en" else "he") }; dialog = null
         }
         SettingsDialog.PIN -> PinDialog(hasPin, onDismiss = { dialog = null }, onSet = { onSetPin(it); dialog = null }, onClear = { onClearPin(); dialog = null })
         null -> Unit

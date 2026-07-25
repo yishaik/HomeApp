@@ -31,7 +31,7 @@ import java.util.Locale
 import java.util.UUID
 
 @Composable
-fun TasksScreen(items: List<HomeItem>, users: Map<String, AppUser>, currentUser: AppUser, onOpenItem: (HomeItem) -> Unit, onComplete: (HomeItem) -> Unit) {
+fun TasksScreen(items: List<HomeItem>, users: Map<String, AppUser>, currentUser: AppUser, onOpenItem: (HomeItem) -> Unit, onComplete: (HomeItem) -> Unit, onQuickAction: (HomeItem, ItemQuickAction) -> Unit = { _, _ -> }) {
     var filter by remember { mutableStateOf("הכול") }
     val now = Instant.now()
     val otherUser = users.values.firstOrNull { it.id != currentUser.id }
@@ -43,36 +43,49 @@ fun TasksScreen(items: List<HomeItem>, users: Map<String, AppUser>, currentUser:
     val tasks = items
         .filter { it.type == ItemType.TASK && it.status != ItemStatus.ARCHIVED }
         .filter { when (filter) { "שלי" -> mine(it); "באיחור" -> it.isOverdue(now); else -> if (filter == otherLabel) theirs(it) else true } }
+        .sortedByDescending { it.pinned }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         FilterRow(listOf("הכול", "שלי", otherLabel, "באיחור"), filter) { filter = it }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { SectionHeader("פתוחות", tasks.count { it.status == ItemStatus.ACTIVE }) }
             lazyItems(tasks.filter { it.status == ItemStatus.ACTIVE }) { task ->
-                SwipeToComplete(task, users, onOpenItem, onComplete)
+                SwipeToComplete(task, users, onOpenItem, onComplete, onQuickAction)
             }
             item { SectionHeader("הושלמו", tasks.count { it.status == ItemStatus.COMPLETED }) }
-            lazyItems(tasks.filter { it.status == ItemStatus.COMPLETED }) { ItemCard(it, users, { onOpenItem(it) }) }
+            lazyItems(tasks.filter { it.status == ItemStatus.COMPLETED }) { ItemCard(it, users, { onOpenItem(it) }, onQuickAction = { action -> onQuickAction(it, action) }) }
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SwipeToComplete(item: HomeItem, users: Map<String, AppUser>, onOpenItem: (HomeItem) -> Unit, onComplete: (HomeItem) -> Unit) {
+private fun SwipeToComplete(item: HomeItem, users: Map<String, AppUser>, onOpenItem: (HomeItem) -> Unit, onComplete: (HomeItem) -> Unit, onQuickAction: (HomeItem, ItemQuickAction) -> Unit) {
     val state = rememberSwipeToDismissBoxState(confirmValueChange = { if (it == SwipeToDismissBoxValue.EndToStart) onComplete(item); it != SwipeToDismissBoxValue.StartToEnd })
     SwipeToDismissBox(state = state, backgroundContent = { Box(Modifier.fillMaxSize().background(ListColor).padding(16.dp), contentAlignment = Alignment.CenterEnd) { Icon(Icons.Default.Done, null, tint = Color.White) } }, enableDismissFromStartToEnd = false) {
-        ItemCard(item, users, { onOpenItem(item) })
+        ItemCard(item, users, { onOpenItem(item) }, onQuickAction = { action -> onQuickAction(item, action) })
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ListsScreen(items: List<HomeItem>, users: Map<String, AppUser>, onOpenItem: (HomeItem) -> Unit, onToggle: (HomeItem, String) -> Unit) {
-    val lists = items.filter { it.type == ItemType.LIST && it.status != ItemStatus.ARCHIVED }
+fun ListsScreen(items: List<HomeItem>, users: Map<String, AppUser>, onOpenItem: (HomeItem) -> Unit, onToggle: (HomeItem, String) -> Unit, onQuickAction: (HomeItem, ItemQuickAction) -> Unit = { _, _ -> }) {
+    val lists = items.filter { it.type == ItemType.LIST && it.status != ItemStatus.ARCHIVED }.sortedByDescending { it.pinned }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         lazyItems(lists) { list ->
-            Card(Modifier.fillMaxWidth().clickable { onOpenItem(list) }) {
+            var menuOpen by remember(list.id) { mutableStateOf(false) }
+            Card(Modifier.fillMaxWidth().combinedClickable(onClick = { onOpenItem(list) }, onLongClick = { menuOpen = true })) {
                 Column(Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.FormatListBulleted, null, tint = ListColor); Spacer(Modifier.width(8.dp)); Text(list.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.FormatListBulleted, null, tint = ListColor); Spacer(Modifier.width(8.dp))
+                        Text(list.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                        if (list.pinned) Icon(Icons.Default.PushPin, null, tint = NoteColor, modifier = Modifier.size(18.dp))
+                        DropdownMenu(menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(text = { Text(if (list.pinned) "ביטול נעיצה" else "נעיצה") }, onClick = { menuOpen = false; onQuickAction(list, ItemQuickAction.TOGGLE_PIN) }, leadingIcon = { Icon(Icons.Default.PushPin, null) })
+                            if (list.status == ItemStatus.ACTIVE) DropdownMenuItem(text = { Text("סמן כהושלם") }, onClick = { menuOpen = false; onQuickAction(list, ItemQuickAction.COMPLETE) }, leadingIcon = { Icon(Icons.Default.Done, null) })
+                            DropdownMenuItem(text = { Text("ארכוב") }, onClick = { menuOpen = false; onQuickAction(list, ItemQuickAction.ARCHIVE) }, leadingIcon = { Icon(Icons.Default.Archive, null) })
+                            DropdownMenuItem(text = { Text("מחיקה") }, onClick = { menuOpen = false; onQuickAction(list, ItemQuickAction.DELETE) }, leadingIcon = { Icon(Icons.Default.Delete, null) })
+                        }
+                    }
                     list.checklist.forEach { entry ->
                         Row(Modifier.fillMaxWidth().clickable { onToggle(list, entry.id) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(entry.completed, { onToggle(list, entry.id) }); Text(entry.title)
@@ -86,7 +99,7 @@ fun ListsScreen(items: List<HomeItem>, users: Map<String, AppUser>, onOpenItem: 
 }
 
 @Composable
-fun NotesScreen(items: List<HomeItem>, users: Map<String, AppUser>, currentUser: AppUser, onOpenItem: (HomeItem) -> Unit, onRead: (HomeItem) -> Unit) {
+fun NotesScreen(items: List<HomeItem>, users: Map<String, AppUser>, currentUser: AppUser, onOpenItem: (HomeItem) -> Unit, onRead: (HomeItem) -> Unit, onQuickAction: (HomeItem, ItemQuickAction) -> Unit = { _, _ -> }) {
     var tab by remember { mutableIntStateOf(0) }
     val now = Instant.now()
     val notes = items.filter { it.type == ItemType.NOTE && it.status != ItemStatus.ARCHIVED && it.isVisibleTo(currentUser.id, now) }
@@ -96,13 +109,13 @@ fun NotesScreen(items: List<HomeItem>, users: Map<String, AppUser>, currentUser:
         TabRow(tab) { listOf("חדשים ${unread.size}", "נקראו ${read.size}", "מתוזמנים").forEachIndexed { i, label -> Tab(tab == i, { tab = i }, text = { Text(label) }) } }
         LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             val shown = when(tab) { 0 -> unread; 1 -> read; else -> items.filter { it.type == ItemType.NOTE && it.creatorId == currentUser.id && it.scheduledPublishAt?.isAfter(now) == true } }
-            lazyItems(shown) { note -> ItemCard(note, users, { onOpenItem(note) }) }
+            lazyItems(shown.sortedByDescending { it.pinned }) { note -> ItemCard(note, users, { onOpenItem(note) }, onQuickAction = { action -> onQuickAction(note, action) }) }
         }
     }
 }
 
 @Composable
-fun SearchScreen(items: List<HomeItem>, users: Map<String, AppUser>, onOpenItem: (HomeItem) -> Unit) {
+fun SearchScreen(items: List<HomeItem>, users: Map<String, AppUser>, onOpenItem: (HomeItem) -> Unit, onQuickAction: (HomeItem, ItemQuickAction) -> Unit = { _, _ -> }) {
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf("הכול") }
     val results = items.filter { item ->
@@ -113,7 +126,7 @@ fun SearchScreen(items: List<HomeItem>, users: Map<String, AppUser>, onOpenItem:
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         OutlinedTextField(query, { query = it }, leadingIcon = { Icon(Icons.Default.Search, null) }, placeholder = { Text("חיפוש בכל התוכן") }, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp)); FilterRow(listOf("הכול","אירוע","משימה","רשימה","פתק"), filter) { filter = it }
-        LazyColumn(contentPadding = PaddingValues(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { lazyItems(results) { ItemCard(it, users, { onOpenItem(it) }) } }
+        LazyColumn(contentPadding = PaddingValues(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { lazyItems(results) { ItemCard(it, users, { onOpenItem(it) }, onQuickAction = { action -> onQuickAction(it, action) }) } }
     }
 }
 

@@ -35,12 +35,12 @@ private val Dark = darkColorScheme(
 )
 
 @Composable
-fun HomeAppTheme(accentArgb: Long = 0xFF5A5BD7, content: @Composable () -> Unit) {
+fun HomeAppTheme(accentArgb: Long = 0xFF5A5BD7, rtl: Boolean = true, content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()
     val accent = Color(accentArgb)
     val scheme = if (dark) Dark.copy(primary = accent) else Light.copy(primary = accent)
     MaterialTheme(colorScheme = scheme, typography = Typography()) {
-        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl, content = content)
+        CompositionLocalProvider(LocalLayoutDirection provides if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr, content = content)
     }
     val view = LocalView.current
     if (!view.isInEditMode) {
