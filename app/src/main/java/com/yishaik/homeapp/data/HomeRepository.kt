@@ -113,7 +113,7 @@ class HomeRepository(
 
     init {
         scope.launch {
-            val cached = database.readItems()
+            val cached = database.readItems().filter { it.status != ItemStatus.CANCELLED }
             if (cached.isEmpty() && !api.configured) {
                 val seed = SampleData.items()
                 database.upsertAll(seed)
@@ -147,7 +147,7 @@ class HomeRepository(
                     val remoteUsers = api.fetchProfiles(session)
                     val remoteItems = api.fetchItems(session)
                     database.replaceAll(remoteItems)
-                    _items.value = remoteItems.sortedBy { it.updatedAt }
+                    _items.value = remoteItems.filter { it.status != ItemStatus.CANCELLED }.sortedBy { it.updatedAt }
                     _users.value = remoteUsers.associateBy { it.id }.ifEmpty { mapOf(session.userId to session.user()) }
                     _currentUser.value = _users.value[session.userId] ?: session.user()
                     _lastSyncError.value = null
@@ -160,7 +160,9 @@ class HomeRepository(
     }
 
     suspend fun save(item: HomeItem): Result<HomeItem> = withContext(Dispatchers.IO) {
-        if (!_online.value && api.configured) return@withContext Result.failure(IllegalStateException("Offline mode is read-only"))
+        // We attempt the write and let the actual network call be the source of truth, rather than
+        // pre-blocking on a transient connectivity flag (which previously stopped every edit from
+        // ever reaching the backend). A genuinely offline call fails fast and surfaces the error.
         runCatching {
             val now = Instant.now()
             val session = sessionStore.load()
@@ -173,9 +175,10 @@ class HomeRepository(
             )
             val saved = if (api.configured && session != null) api.upsertItem(normalized, validSession()) else normalized
             database.upsert(saved)
-            _items.value = (_items.value.filterNot { it.id == saved.id } + saved).sortedBy { it.updatedAt }
+            _items.value = (_items.value.filterNot { it.id == saved.id } + saved).filter { it.status != ItemStatus.CANCELLED }.sortedBy { it.updatedAt }
+            _lastSyncError.value = null
             saved
-        }
+        }.onFailure { _lastSyncError.value = it.message ?: "Save failed" }
     }
 
     suspend fun archive(id: String): Result<Unit> = mutate(id) { it.copy(status = ItemStatus.ARCHIVED) }
@@ -209,23 +212,15 @@ class HomeRepository(
     }
 
     /**
-     * Deletes an item locally + remotely. Remote delete uses a real DELETE when the API is
-     * configured; if that call fails (or the API is not configured), we fall back to a
-     * soft-delete (status = CANCELLED) so the item stays consistent across devices. The local
-     * row is always removed so it disappears from the UI immediately.
+     * Soft-deletes an item. The backend forbids hard DELETE via RLS (homeapp_items_no_delete),
+     * so we mark the row CANCELLED through the normal save/upsert path (which the DB does allow)
+     * and hide CANCELLED items everywhere. This persists across devices and survives a sync,
+     * unlike a hard DELETE which the server silently ignores.
      */
-    suspend fun delete(id: String): Result<Unit> = withContext(Dispatchers.IO) {
-        val item = _items.value.firstOrNull { it.id == id } ?: return@withContext Result.failure(NoSuchElementException(id))
-        if (!_online.value && api.configured) return@withContext Result.failure(IllegalStateException("Offline mode is read-only"))
-        runCatching {
-            val session = sessionStore.load()
-            if (api.configured && session != null) {
-                runCatching { api.deleteItem(id, validSession()) }
-                    .onFailure { api.upsertItem(item.copy(status = ItemStatus.CANCELLED, updatedAt = Instant.now()), validSession()) }
-            }
-            database.deleteItem(id)
-            _items.value = _items.value.filterNot { it.id == id }
-        }
+    suspend fun delete(id: String): Result<Unit> {
+        val item = _items.value.firstOrNull { it.id == id } ?: return Result.failure(NoSuchElementException(id))
+        return save(item.copy(status = ItemStatus.CANCELLED)).map { Unit }
+            .also { if (it.isSuccess) _items.value = _items.value.filterNot { i -> i.id == id } }
     }
 
     suspend fun markNoteRead(itemId: String, userId: String): Result<Unit> = mutate(itemId) { item ->

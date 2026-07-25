@@ -78,7 +78,7 @@ fun ItemDetailScreen(
             title = { Text(when(item.type) { ItemType.EVENT -> "פרטי אירוע"; ItemType.TASK -> "פרטי משימה"; ItemType.LIST -> "פרטי רשימה"; ItemType.NOTE -> "פרטי פתק" }) },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
             actions = {
-                if (editable && online) IconButton(onClick = { editing = !editing }) { Icon(if (editing) Icons.Default.Close else Icons.Default.Edit, null) }
+                if (editable) IconButton(onClick = { editing = !editing }) { Icon(if (editing) Icons.Default.Close else Icons.Default.Edit, null) }
                 IconButton(onClick = { onSave(item.copy(pinned = !item.pinned)) }, enabled = online) { Icon(Icons.Default.PushPin, null, tint = if (item.pinned) itemColor(item.type) else LocalContentColor.current) }
                 IconButton(onClick = { showMenu = true }, enabled = online) { Icon(Icons.Default.MoreVert, null) }
                 DropdownMenu(showMenu, onDismissRequest = { showMenu = false }) {
@@ -146,12 +146,12 @@ fun ItemDetailScreen(
                 item { Text("פריטים", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
                 lazyItems(item.checklist, key = { it.id }) { entry ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(entry.completed, { if (online) onToggleChecklist(entry.id) }, enabled = online)
+                        Checkbox(entry.completed, { onToggleChecklist(entry.id) })
                         Text(entry.title, Modifier.weight(1f), textDecoration = if (entry.completed) TextDecoration.LineThrough else null)
-                        if (online) IconButton(onClick = { onRemoveChecklistEntry(entry.id) }) { Icon(Icons.Default.Close, null, Modifier.size(18.dp)) }
+                        IconButton(onClick = { onRemoveChecklistEntry(entry.id) }) { Icon(Icons.Default.Close, null, Modifier.size(18.dp)) }
                     }
                 }
-                if (item.type == ItemType.LIST && online) item {
+                if (item.type == ItemType.LIST) item {
                     OutlinedTextField(newEntry, { newEntry = it }, modifier = Modifier.fillMaxWidth(), label = { Text("פריט חדש") }, singleLine = true, trailingIcon = {
                         IconButton(enabled = newEntry.isNotBlank(), onClick = { onAddChecklistEntry(newEntry.trim()); newEntry = "" }) { Icon(Icons.Default.Add, null) }
                     })
@@ -183,7 +183,7 @@ fun ItemDetailScreen(
             }
             item {
                 OutlinedTextField(comment, { comment = it }, modifier = Modifier.fillMaxWidth(), label = { Text("כתיבת תגובה…") }, trailingIcon = {
-                    IconButton(enabled = online && comment.isNotBlank(), onClick = { onSave(item.copy(comments = item.comments + Comment(authorId = currentUser.id, text = comment))); comment = "" }) { Icon(Icons.Default.Send, null) }
+                    IconButton(enabled = comment.isNotBlank(), onClick = { onSave(item.copy(comments = item.comments + Comment(authorId = currentUser.id, text = comment))); comment = "" }) { Icon(Icons.Default.Send, null) }
                 })
             }
             if (item.type == ItemType.TASK || item.type == ItemType.LIST) item { Button(onClick = onComplete, enabled = online && item.status == ItemStatus.ACTIVE, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Done, null); Spacer(Modifier.width(8.dp)); Text("סימון כהושלם") } }
