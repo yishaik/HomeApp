@@ -31,11 +31,20 @@ import java.util.Locale
 import java.util.UUID
 
 @Composable
-fun TasksScreen(items: List<HomeItem>, users: Map<String, AppUser>, onOpenItem: (HomeItem) -> Unit, onComplete: (HomeItem) -> Unit) {
+fun TasksScreen(items: List<HomeItem>, users: Map<String, AppUser>, currentUser: AppUser, onOpenItem: (HomeItem) -> Unit, onComplete: (HomeItem) -> Unit) {
     var filter by remember { mutableStateOf("הכול") }
-    val tasks = items.filter { it.type == ItemType.TASK && it.status != ItemStatus.ARCHIVED }
+    val now = Instant.now()
+    val otherUser = users.values.firstOrNull { it.id != currentUser.id }
+    val otherLabel = otherUser?.displayName ?: "השני"
+    val myAssignee = if (currentUser.id == "u1") Assignee.USER_ONE else Assignee.USER_TWO
+    val otherAssignee = if (myAssignee == Assignee.USER_ONE) Assignee.USER_TWO else Assignee.USER_ONE
+    fun mine(t: HomeItem) = t.creatorId == currentUser.id || t.assignee == myAssignee || t.assignee == Assignee.BOTH
+    fun theirs(t: HomeItem) = (otherUser != null && t.creatorId == otherUser.id) || t.assignee == otherAssignee || t.assignee == Assignee.BOTH
+    val tasks = items
+        .filter { it.type == ItemType.TASK && it.status != ItemStatus.ARCHIVED }
+        .filter { when (filter) { "שלי" -> mine(it); "באיחור" -> it.isOverdue(now); else -> if (filter == otherLabel) theirs(it) else true } }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        FilterRow(listOf("הכול","שלי","מעיין","באיחור"), filter) { filter = it }
+        FilterRow(listOf("הכול", "שלי", otherLabel, "באיחור"), filter) { filter = it }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { SectionHeader("פתוחות", tasks.count { it.status == ItemStatus.ACTIVE }) }
             lazyItems(tasks.filter { it.status == ItemStatus.ACTIVE }) { task ->

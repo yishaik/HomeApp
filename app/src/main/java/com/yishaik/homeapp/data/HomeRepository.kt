@@ -1,10 +1,13 @@
 package com.yishaik.homeapp.data
 
+import com.yishaik.homeapp.domain.AppNotification
 import com.yishaik.homeapp.domain.AppUser
+import com.yishaik.homeapp.domain.ChecklistEntry
 import com.yishaik.homeapp.domain.HomeItem
 import com.yishaik.homeapp.domain.ItemStatus
 import com.yishaik.homeapp.domain.ItemType
 import com.yishaik.homeapp.domain.ReadReceipt
+import com.yishaik.homeapp.domain.Reminder
 import com.yishaik.homeapp.domain.SampleData
 import com.yishaik.homeapp.security.AuthSession
 import com.yishaik.homeapp.security.SessionStore
@@ -13,8 +16,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -28,6 +35,7 @@ class HomeRepository(
     private val connectivity: ConnectivityObserver,
     private val api: SupabaseApi,
     private val sessionStore: SessionStore,
+    private val preferences: PreferencesStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val syncMutex = Mutex()
@@ -46,6 +54,62 @@ class HomeRepository(
     val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
     private val _lastSyncError = MutableStateFlow<String?>(null)
     val lastSyncError: StateFlow<String?> = _lastSyncError.asStateFlow()
+    private val _notificationsSeenAt = MutableStateFlow(preferences.notificationsSeenAt())
+
+    /**
+     * Notifications derived from real signals: items updated by the OTHER user, task/list
+     * completions by the other user, and new comments authored by the other user. An item is
+     * "unread" when its updatedAt is after the current user's notifications-seen timestamp.
+     */
+    val notifications: StateFlow<List<AppNotification>> =
+        combine(_items, _currentUser, _notificationsSeenAt) { items, me, seenAt ->
+            deriveNotifications(items, me.id, seenAt)
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    val unreadCount: StateFlow<Int> = notifications
+        .map { list -> list.count { !it.read } }
+        .stateIn(scope, SharingStarted.Eagerly, 0)
+
+    private fun deriveNotifications(items: List<HomeItem>, meId: String, seenAt: Instant?): List<AppNotification> =
+        items.asSequence()
+            .filter { it.status != ItemStatus.ARCHIVED }
+            .filter { it.creatorId != meId || it.comments.any { c -> c.authorId != meId } }
+            .mapNotNull { item ->
+                val otherComment = item.comments.filter { it.authorId != meId }.maxByOrNull { it.createdAt }
+                val fromOther = item.creatorId != meId
+                val (title, detail, at) = when {
+                    fromOther && item.status == ItemStatus.COMPLETED ->
+                        Triple("הושלם: ${item.title}", "המשימה סומנה כהושלמה", item.updatedAt)
+                    otherComment != null && (fromOther || otherComment.createdAt >= item.updatedAt.minusSeconds(1)) ->
+                        Triple("תגובה חדשה: ${item.title}", otherComment.text, otherComment.createdAt)
+                    fromOther ->
+                        Triple("עודכן: ${item.title}", labelFor(item), item.updatedAt)
+                    else -> return@mapNotNull null
+                }
+                AppNotification(
+                    recipientId = meId,
+                    itemId = item.id,
+                    title = title,
+                    detail = detail,
+                    read = seenAt != null && !at.isAfter(seenAt),
+                    createdAt = at,
+                )
+            }
+            .sortedByDescending { it.createdAt }
+            .take(30)
+            .toList()
+
+    private fun labelFor(item: HomeItem): String = when (item.type) {
+        ItemType.EVENT -> "אירוע עודכן"
+        ItemType.TASK -> "משימה עודכנה"
+        ItemType.LIST -> "רשימה עודכנה"
+        ItemType.NOTE -> "פתק חדש"
+    }
+
+    fun markAllNotificationsRead() {
+        preferences.markNotificationsSeen()
+        _notificationsSeenAt.value = preferences.notificationsSeenAt()
+    }
 
     init {
         scope.launch {
@@ -126,6 +190,44 @@ class HomeRepository(
         )
     }
 
+    suspend fun addChecklistEntry(itemId: String, title: String): Result<Unit> = mutate(itemId) { item ->
+        val next = item.checklist + ChecklistEntry(title = title.trim(), orderIndex = item.checklist.size)
+        item.copy(checklist = next, status = if (item.status == ItemStatus.COMPLETED) ItemStatus.ACTIVE else item.status)
+    }
+
+    suspend fun removeChecklistEntry(itemId: String, entryId: String): Result<Unit> = mutate(itemId) { item ->
+        item.copy(checklist = item.checklist.filterNot { it.id == entryId })
+    }
+
+    suspend fun renameChecklistEntry(itemId: String, entryId: String, title: String): Result<Unit> = mutate(itemId) { item ->
+        item.copy(checklist = item.checklist.map { if (it.id == entryId) it.copy(title = title.trim()) else it })
+    }
+
+    suspend fun setReminders(itemId: String, reminders: List<Reminder>): Result<HomeItem> {
+        val item = _items.value.firstOrNull { it.id == itemId } ?: return Result.failure(NoSuchElementException(itemId))
+        return save(item.copy(reminders = reminders))
+    }
+
+    /**
+     * Deletes an item locally + remotely. Remote delete uses a real DELETE when the API is
+     * configured; if that call fails (or the API is not configured), we fall back to a
+     * soft-delete (status = CANCELLED) so the item stays consistent across devices. The local
+     * row is always removed so it disappears from the UI immediately.
+     */
+    suspend fun delete(id: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val item = _items.value.firstOrNull { it.id == id } ?: return@withContext Result.failure(NoSuchElementException(id))
+        if (!_online.value && api.configured) return@withContext Result.failure(IllegalStateException("Offline mode is read-only"))
+        runCatching {
+            val session = sessionStore.load()
+            if (api.configured && session != null) {
+                runCatching { api.deleteItem(id, validSession()) }
+                    .onFailure { api.upsertItem(item.copy(status = ItemStatus.CANCELLED, updatedAt = Instant.now()), validSession()) }
+            }
+            database.deleteItem(id)
+            _items.value = _items.value.filterNot { it.id == id }
+        }
+    }
+
     suspend fun markNoteRead(itemId: String, userId: String): Result<Unit> = mutate(itemId) { item ->
         item.copy(readReceipts = item.readReceipts.filterNot { it.userId == userId } + ReadReceipt(userId, Instant.now()))
     }
@@ -142,6 +244,14 @@ class HomeRepository(
     fun setCurrentUser(user: AppUser) {
         _currentUser.value = user
         _users.value = _users.value + (user.id to user)
+    }
+
+    /** Renames the current user in memory and persists the display name to the local session so it survives reloads. */
+    fun renameCurrentUser(displayName: String) {
+        val name = displayName.trim().ifBlank { return }
+        val updated = _currentUser.value.copy(displayName = name)
+        setCurrentUser(updated)
+        sessionStore.load()?.let { sessionStore.save(it.copy(displayName = name)) }
     }
 
     fun logout() {
