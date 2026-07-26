@@ -304,13 +304,22 @@ class HomeRepository(
     /** Renames the current user in memory and persists the display name to the local session so it survives reloads. */
     fun renameCurrentUser(displayName: String) = setProfile(displayName, _currentUser.value.avatar, _currentUser.value.accentArgb)
 
-    /** Updates the current user's display name, avatar glyph and accent colour, persisting to the local session. */
+    /** Updates the current user's display name, avatar glyph and accent colour: locally + persisted
+     *  to homeapp_profiles. Without the remote write, the next sync's fetchProfiles() would pull the
+     *  old row and silently revert the change — this was exactly that bug. */
     fun setProfile(displayName: String, avatar: String, accentArgb: Long) {
         val name = displayName.trim().ifBlank { return }
         val glyph = avatar.trim().take(2).ifBlank { _currentUser.value.avatar }
         val updated = _currentUser.value.copy(displayName = name, avatar = glyph, accentArgb = accentArgb)
         setCurrentUser(updated)
         sessionStore.load()?.let { sessionStore.save(it.copy(displayName = name, avatar = glyph, accentArgb = accentArgb)) }
+        if (api.configured && sessionStore.load() != null) {
+            scope.launch {
+                runCatching { api.updateProfile(validSession(), name, glyph, accentArgb) }
+                    .onSuccess { _lastSyncError.value = null }
+                    .onFailure { _lastSyncError.value = it.message ?: "Profile update queued (will retry)" }
+            }
+        }
     }
 
     /**

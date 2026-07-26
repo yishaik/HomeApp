@@ -112,6 +112,21 @@ class SupabaseApi(
         }
     }
 
+    suspend fun updateProfile(session: AuthSession, displayName: String, avatar: String, accentArgb: Long): Unit = withContext(Dispatchers.IO) {
+        val body = JSONObject().apply {
+            put("display_name", displayName); put("avatar", avatar); put("accent_argb", accentArgb)
+        }
+        val request = authenticatedRequestBuilder("/rest/v1/homeapp_profiles?id=eq.${session.userId}", session.accessToken)
+            .patch(body.toString().toRequestBody(JSON))
+            .build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val json = runCatching { JSONObject(response.body?.string().orEmpty()) }.getOrDefault(JSONObject())
+                throw apiError("Supabase", response.code, json)
+            }
+        }
+    }
+
     suspend fun fetchItems(session: AuthSession): List<HomeItem> = withContext(Dispatchers.IO) {
         val request = authenticatedRequestBuilder(
             "/rest/v1/homeapp_items?household_id=eq.${session.householdId}&select=payload&order=updated_at.asc",
