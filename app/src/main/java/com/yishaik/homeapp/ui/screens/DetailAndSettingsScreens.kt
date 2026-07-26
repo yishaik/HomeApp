@@ -13,6 +13,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.PushPin
@@ -51,6 +53,8 @@ fun ItemDetailScreen(
     onAddChecklistEntry: (String) -> Unit,
     onRemoveChecklistEntry: (String) -> Unit,
     onSetReminder: (Int?) -> Unit,
+    exactAlarmPermissionGranted: Boolean = true,
+    onRequestExactAlarmPermission: () -> Unit = {},
 ) {
     var editing by remember { mutableStateOf(false) }
     var title by remember(item.id) { mutableStateOf(item.title) }
@@ -79,7 +83,7 @@ fun ItemDetailScreen(
     Scaffold(
         topBar = { TopAppBar(
             title = { Text(when(item.type) { ItemType.EVENT -> "פרטי אירוע"; ItemType.TASK -> "פרטי משימה"; ItemType.LIST -> "פרטי רשימה"; ItemType.NOTE -> "פרטי פתק" }) },
-            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) } },
             actions = {
                 if (editable) IconButton(onClick = { editing = !editing }) { Icon(if (editing) Icons.Default.Close else Icons.Default.Edit, null) }
                 IconButton(onClick = { onSave(item.copy(pinned = !item.pinned)) }) { Icon(if (item.pinned) Icons.Filled.PushPin else Icons.Outlined.PushPin, null, tint = if (item.pinned) itemColor(item.type) else LocalContentColor.current) }
@@ -162,6 +166,10 @@ fun ItemDetailScreen(
                         detailReminderChoices.forEach { (label, minutes) ->
                             FilterChip((current ?: -1) == minutes, { onSetReminder(minutes.takeIf { it >= 0 }) }, label = { Text(label) })
                         }
+                    }
+                    if (!exactAlarmPermissionGranted) {
+                        Spacer(Modifier.height(8.dp))
+                        com.yishaik.homeapp.ui.components.ExactAlarmWarningRow(onRequestExactAlarmPermission)
                     }
                 }}
             }
@@ -347,7 +355,7 @@ fun NotificationsScreen(
     onMarkAll: () -> Unit,
     onOpenItem: (String) -> Unit,
 ) {
-    Scaffold(topBar = { TopAppBar(title = { Text("התראות") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }, actions = { TextButton(onClick = onMarkAll, enabled = notifications.any { !it.read }) { Text("סמן הכול") } }) }) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text("התראות") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) } }, actions = { TextButton(onClick = onMarkAll, enabled = notifications.any { !it.read }) { Text("סמן הכול") } }) }) { padding ->
         if (notifications.isEmpty()) {
             Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("אין התראות חדשות", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -387,7 +395,7 @@ fun SettingsScreen(
 
     fun accentLabel(argb: Long) = accentOptions.firstOrNull { it.second == argb }?.first ?: "מותאם"
 
-    Scaffold(topBar = { TopAppBar(title = { Text("הגדרות") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }) }) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text("הגדרות") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) } }) }) { padding ->
         LazyColumn(Modifier.padding(padding), contentPadding = PaddingValues(16.dp)) {
             item { SettingRow(Icons.Default.AccountCircle, "פרופיל", currentUser.displayName) { dialog = SettingsDialog.PROFILE } }
             item { HorizontalDivider() }
@@ -476,7 +484,7 @@ private fun SettingRow(icon: androidx.compose.ui.graphics.vector.ImageVector, ti
         leadingContent = { Icon(icon, null) },
         headlineContent = { Text(title) },
         supportingContent = { Text(value) },
-        trailingContent = { Icon(Icons.Default.ChevronLeft, null) },
+        trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, null) },
     )
 }
 

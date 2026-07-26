@@ -175,3 +175,20 @@ fun FilterRow(filters: List<String>, selected: String, onSelected: (String) -> U
         filters.forEach { label -> FilterChip(selected = selected == label, onClick = { onSelected(label) }, label = { Text(label) }) }
     }
 }
+
+// N8: shown next to reminder controls when the exact-alarm permission (API 31+) is missing, so
+// reminders silently degrading to "sometime around" doesn't happen without the user knowing.
+@Composable
+fun ExactAlarmWarningRow(onRequestPermission: () -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Default.WarningAmber, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(
+            "התזכורות עלולות להיות לא מדויקות — יש לאשר הרשאה",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onRequestPermission) { Text("הרשאה") }
+    }
+}

@@ -15,8 +15,8 @@ android {
         applicationId = "com.yishaik.homeapp"
         minSdk = 26
         targetSdk = 37
-        versionCode = 6
-        versionName = "1.4.0"
+        versionCode = 7
+        versionName = "1.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
         buildConfigField("String", "SUPABASE_URL", "\"${supabaseUrl.get()}\"")
@@ -49,6 +49,9 @@ android {
     lint {
         abortOnError = true
         checkReleaseBuilds = true
+        // False positive on the machine-local, gitignored local.properties (which Android Studio
+        // itself generates with an unescaped drive-letter colon) — not a source-code issue.
+        disable += "PropertyEscape"
     }
 
     packaging {

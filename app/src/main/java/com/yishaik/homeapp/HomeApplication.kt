@@ -18,6 +18,7 @@ import com.yishaik.homeapp.security.PinVault
 import com.yishaik.homeapp.security.SessionStore
 import com.yishaik.homeapp.sync.SupabaseApi
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class HomeApplication : Application() {
     lateinit var repository: HomeRepository
@@ -26,6 +27,11 @@ class HomeApplication : Application() {
     lateinit var sessionStore: SessionStore
     lateinit var activationManager: ActivationManager
     lateinit var reminderScheduler: ReminderScheduler
+
+    /** Id of an item to open once it's available, set when a reminder notification is tapped
+     *  (MainActivity.onCreate/onNewIntent) and consumed by HomeAppRoot once `items` contains it —
+     *  see N14. Survives the case where the item list hasn't finished loading yet. */
+    val pendingDeepLinkItemId = MutableStateFlow<String?>(null)
 
     override fun onCreate() {
         super.onCreate()

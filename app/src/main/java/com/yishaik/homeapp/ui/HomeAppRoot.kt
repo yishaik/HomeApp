@@ -1,5 +1,9 @@
 package com.yishaik.homeapp.ui
 
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -28,6 +32,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,6 +41,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -178,6 +187,35 @@ private fun MainApp(app: HomeApplication, onLogout: () -> Unit) {
     var showNotifications by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    // N14: a reminder notification tap stashes an item id on the application; open it once it's
+    // present in the loaded list, then clear the pending id so it doesn't re-trigger later.
+    val pendingDeepLinkItemId by app.pendingDeepLinkItemId.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingDeepLinkItemId, items) {
+        val id = pendingDeepLinkItemId ?: return@LaunchedEffect
+        items.firstOrNull { it.id == id }?.let {
+            selectedItem = it
+            app.pendingDeepLinkItemId.value = null
+        }
+    }
+
+    // N8: exact-alarm permission (API 31+) can be revoked/granted from system Settings while the
+    // app is backgrounded, so re-check on every resume rather than once at composition.
+    var exactAlarmPermission by remember { mutableStateOf(app.reminderScheduler.hasExactAlarmPermission()) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) exactAlarmPermission = app.reminderScheduler.hasExactAlarmPermission()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val onRequestExactAlarmPermission: () -> Unit = {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")))
+        }
+    }
 
     if (selectedItem != null) {
         BackHandler { selectedItem = null }
@@ -204,6 +242,8 @@ private fun MainApp(app: HomeApplication, onLogout: () -> Unit) {
                     }
                 }
             },
+            exactAlarmPermissionGranted = exactAlarmPermission,
+            onRequestExactAlarmPermission = onRequestExactAlarmPermission,
         )
         return
     }
@@ -338,6 +378,8 @@ private fun MainApp(app: HomeApplication, onLogout: () -> Unit) {
                     }
                 }
             },
+            exactAlarmPermissionGranted = exactAlarmPermission,
+            onRequestExactAlarmPermission = onRequestExactAlarmPermission,
         )
     }
 }

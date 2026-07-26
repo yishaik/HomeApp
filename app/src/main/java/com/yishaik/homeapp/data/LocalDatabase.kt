@@ -7,12 +7,23 @@ import android.database.sqlite.SQLiteOpenHelper
 import com.yishaik.homeapp.domain.HomeItem
 
 class LocalDatabase(context: Context) : SQLiteOpenHelper(context, "homeapp.db", null, 1) {
-    override fun onCreate(db: SQLiteDatabase) {
+    override fun onCreate(db: SQLiteDatabase) = createTables(db)
+
+    // This database is a pure local cache re-populated from Supabase (see HomeRepository init /
+    // syncNow), so on a schema-version bump the safest real migration is to drop and recreate the
+    // tables: `items` is refilled by the next sync, and losing `metadata` (prefs/pending) on a
+    // genuine version bump is acceptable — far better than silently running on a stale/incompatible
+    // schema, which is what the previous no-op left us with.
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        db.execSQL("DROP TABLE IF EXISTS items")
+        db.execSQL("DROP TABLE IF EXISTS metadata")
+        createTables(db)
+    }
+
+    private fun createTables(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE items(id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     }
-
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
 
     fun readItems(): List<HomeItem> = readableDatabase.query("items", arrayOf("payload"), null, null, null, null, "updated_at ASC").use { c ->
         buildList { while (c.moveToNext()) runCatching { JsonCodec.decode(c.getString(0)) }.getOrNull()?.let(::add) }

@@ -42,6 +42,8 @@ fun QuickAddSheet(
     defaultTaskReminderMinutes: Int,
     onDismiss: () -> Unit,
     onSave: (HomeItem) -> Unit,
+    exactAlarmPermissionGranted: Boolean = true,
+    onRequestExactAlarmPermission: () -> Unit = {},
 ) {
     var text by remember { mutableStateOf("") }
     var listTitle by remember { mutableStateOf("") }
@@ -113,6 +115,7 @@ fun QuickAddSheet(
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { lazyItems(reminderChoices) { (label, minutes) ->
                     FilterChip(activeReminder == minutes, { reminderMinutes = minutes }, label = { Text(label) })
                 } }
+                if (!exactAlarmPermissionGranted) com.yishaik.homeapp.ui.components.ExactAlarmWarningRow(onRequestExactAlarmPermission)
             }
             Row(verticalAlignment = Alignment.CenterVertically) { Switch(notify, { notify = it }); Spacer(Modifier.width(8.dp)); Text("הודע למשתמש השני") }
             Row(verticalAlignment = Alignment.CenterVertically) {

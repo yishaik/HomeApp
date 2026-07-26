@@ -23,8 +23,8 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: ""
-      - name: Test and build APK
-        run: gradle --no-daemon test assembleDebug
+      - name: Lint, test and build APKs
+        run: gradle --no-daemon lint test assembleDebug assembleRelease
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:

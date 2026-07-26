@@ -8,6 +8,8 @@ import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -49,12 +51,12 @@ fun TodayScreen(items: List<HomeItem>, users: Map<String, AppUser>, currentUser:
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                IconButton(onClick = { date = date.minusDays(1) }) { Icon(Icons.Default.ChevronLeft, null) }
+                IconButton(onClick = { date = date.minusDays(1) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, null) }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(if (date == LocalDate.now()) "היום" else date.format(DateTimeFormatter.ofPattern("EEEE", Locale("he"))), fontWeight = FontWeight.Bold)
                     Text(date.format(DateTimeFormatter.ofPattern("d MMMM yyyy", Locale("he"))), style = MaterialTheme.typography.bodySmall)
                 }
-                IconButton(onClick = { date = date.plusDays(1) }) { Icon(Icons.Default.ChevronRight, null) }
+                IconButton(onClick = { date = date.plusDays(1) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) }
             }
         }
         if (holidayEntries.isNotEmpty()) {
