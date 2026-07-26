@@ -38,7 +38,20 @@ class HomeRepository(
     private val preferences: PreferencesStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Guards the *network* phase of a sync so two syncs never interleave their fetches. */
     private val syncMutex = Mutex()
+
+    /**
+     * Guards every mutation of the local SQLite cache, the pending-push set and [_items], so that
+     * a save and a sync's destructive `replaceAll` can never interleave (see audit N2/N3).
+     *
+     * Rules — Kotlin's [Mutex] is NOT reentrant, so they matter:
+     *  - never acquire it while already holding it (helpers suffixed `Locked` assume the caller holds it),
+     *  - never hold it across a network call (fetch/push always happen outside),
+     *  - it is always the innermost lock: `syncMutex` may be held while taking it, never the reverse.
+     */
+    private val dbMutex = Mutex()
     private var realtime: WebSocket? = null
     private var realtimeToken: String? = null
 
@@ -54,12 +67,15 @@ class HomeRepository(
     val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
     private val _lastSyncError = MutableStateFlow<String?>(null)
     val lastSyncError: StateFlow<String?> = _lastSyncError.asStateFlow()
+    private val _pendingIds = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Ids of items with local changes not yet confirmed pushed — drives the per-item "pending" badge. */
+    val pendingIds: StateFlow<Set<String>> = _pendingIds.asStateFlow()
     private val _notificationsSeenAt = MutableStateFlow(preferences.notificationsSeenAt())
 
     /**
-     * Notifications derived from real signals: items updated by the OTHER user, task/list
-     * completions by the other user, and new comments authored by the other user. An item is
-     * "unread" when its updatedAt is after the current user's notifications-seen timestamp.
+     * Notifications derived from real signals — see [deriveNotifications]. An item is "unread"
+     * while its timestamp is after the current user's notifications-seen timestamp.
      */
     val notifications: StateFlow<List<AppNotification>> =
         combine(_items, _currentUser, _notificationsSeenAt) { items, me, seenAt ->
@@ -70,42 +86,6 @@ class HomeRepository(
         .map { list -> list.count { !it.read } }
         .stateIn(scope, SharingStarted.Eagerly, 0)
 
-    private fun deriveNotifications(items: List<HomeItem>, meId: String, seenAt: Instant?): List<AppNotification> =
-        items.asSequence()
-            .filter { it.status != ItemStatus.ARCHIVED }
-            .filter { it.creatorId != meId || it.comments.any { c -> c.authorId != meId } }
-            .mapNotNull { item ->
-                val otherComment = item.comments.filter { it.authorId != meId }.maxByOrNull { it.createdAt }
-                val fromOther = item.creatorId != meId
-                val (title, detail, at) = when {
-                    fromOther && item.status == ItemStatus.COMPLETED ->
-                        Triple("הושלם: ${item.title}", "המשימה סומנה כהושלמה", item.updatedAt)
-                    otherComment != null && (fromOther || otherComment.createdAt >= item.updatedAt.minusSeconds(1)) ->
-                        Triple("תגובה חדשה: ${item.title}", otherComment.text, otherComment.createdAt)
-                    fromOther ->
-                        Triple("עודכן: ${item.title}", labelFor(item), item.updatedAt)
-                    else -> return@mapNotNull null
-                }
-                AppNotification(
-                    recipientId = meId,
-                    itemId = item.id,
-                    title = title,
-                    detail = detail,
-                    read = seenAt != null && !at.isAfter(seenAt),
-                    createdAt = at,
-                )
-            }
-            .sortedByDescending { it.createdAt }
-            .take(30)
-            .toList()
-
-    private fun labelFor(item: HomeItem): String = when (item.type) {
-        ItemType.EVENT -> "אירוע עודכן"
-        ItemType.TASK -> "משימה עודכנה"
-        ItemType.LIST -> "רשימה עודכנה"
-        ItemType.NOTE -> "פתק חדש"
-    }
-
     fun markAllNotificationsRead() {
         preferences.markNotificationsSeen()
         _notificationsSeenAt.value = preferences.notificationsSeenAt()
@@ -113,13 +93,16 @@ class HomeRepository(
 
     init {
         scope.launch {
-            val cached = database.readItems().filter { it.status != ItemStatus.CANCELLED }
-            if (cached.isEmpty() && !api.configured) {
-                val seed = SampleData.items()
-                database.upsertAll(seed)
-                _items.value = seed
-            } else {
-                _items.value = cached
+            dbMutex.withLock {
+                _pendingIds.value = pendingIdsLocked()
+                val cached = database.readItems().filter { it.status != ItemStatus.CANCELLED }
+                if (cached.isEmpty() && !api.configured) {
+                    val seed = SampleData.items()
+                    database.upsertAll(seed)
+                    _items.value = seed
+                } else {
+                    _items.value = cached
+                }
             }
         }
         scope.launch {
@@ -139,19 +122,35 @@ class HomeRepository(
 
     // Items with local changes not yet confirmed pushed to the backend. Persisted across restarts
     // so a change is never lost if a push fails (bad session, offline, server hiccup).
-    private fun pendingIds(): Set<String> =
-        database.getMetadata("pending_push")?.split(",")?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
-    private fun markPending(id: String) = database.setMetadata("pending_push", (pendingIds() + id).joinToString(","))
-    private fun clearPending(id: String) = database.setMetadata("pending_push", (pendingIds() - id).joinToString(","))
+    // ALL FOUR HELPERS BELOW ASSUME THE CALLER ALREADY HOLDS [dbMutex] — they never take it
+    // themselves, so they can be composed inside a larger locked section without deadlocking.
+    private fun pendingIdsLocked(): Set<String> = PendingSet.decode(database.getMetadata("pending_push"))
 
-    /** Best-effort push of every locally-changed item to the backend; clears the pending flag on success. */
+    private fun setPendingLocked(ids: Set<String>) {
+        database.setMetadata("pending_push", PendingSet.encode(ids))
+        _pendingIds.value = ids
+    }
+
+    private fun markPendingLocked(id: String) = setPendingLocked(PendingSet.add(database.getMetadata("pending_push"), id))
+
+    private fun clearPendingLocked(id: String) = setPendingLocked(PendingSet.remove(database.getMetadata("pending_push"), id))
+
+    /**
+     * Best-effort push of every locally-changed item to the backend; clears the pending flag on
+     * success. The local read and the flag decision happen under [dbMutex]; every network call
+     * happens outside it.
+     */
     suspend fun pushPending() {
         if (!api.configured || !sessionStore.hasSession()) return
-        val byId = database.readItems().associateBy { it.id }
-        for (id in pendingIds()) {
-            val local = byId[id] ?: run { clearPending(id); continue }
+        val ids = dbMutex.withLock { pendingIdsLocked() }
+        for (id in ids) {
+            // Re-check under the lock: the item may have been pushed or removed since the snapshot.
+            val local = dbMutex.withLock {
+                if (id !in pendingIdsLocked()) null
+                else database.readItem(id).also { if (it == null) clearPendingLocked(id) }
+            } ?: continue
             runCatching { api.upsertItem(local, validSession()) }
-                .onSuccess { clearPending(id); _lastSyncError.value = null }
+                .onSuccess { dbMutex.withLock { clearPendingLocked(id) }; _lastSyncError.value = null }
                 .onFailure { _lastSyncError.value = it.message ?: "Sync pending" }
         }
     }
@@ -163,16 +162,22 @@ class HomeRepository(
                 _syncing.value = true
                 try {
                     val session = validSession()
+                    // Network phase — deliberately outside dbMutex, so a save() is never blocked
+                    // behind a fetch and the lock is never held across IO.
                     val remoteUsers = api.fetchProfiles(session)
                     val remoteItems = api.fetchItems(session)
                     // Merge: keep local (unsynced) versions of pending items so a background push can
                     // still deliver them; everything else takes the remote copy. This stops sync from
-                    // resurrecting a locally-deleted item or clobbering a local edit.
-                    val pending = pendingIds()
-                    val localById = database.readItems().associateBy { it.id }
-                    val merged = remoteItems.filter { it.id !in pending } + pending.mapNotNull { localById[it] }
-                    database.replaceAll(merged)
-                    _items.value = merged.filter { it.status != ItemStatus.CANCELLED }.sortedBy { it.updatedAt }
+                    // resurrecting a locally-deleted item or clobbering a local edit. Reading the
+                    // pending snapshot and running the destructive replaceAll must be atomic with
+                    // respect to save(), otherwise a row written between the two is deleted (N3).
+                    dbMutex.withLock {
+                        val pending = pendingIdsLocked()
+                        val localById = database.readItems().associateBy { it.id }
+                        val merged = remoteItems.filter { it.id !in pending } + pending.mapNotNull { localById[it] }
+                        database.replaceAll(merged)
+                        _items.value = merged.filter { it.status != ItemStatus.CANCELLED }.sortedBy { it.updatedAt }
+                    }
                     _users.value = remoteUsers.associateBy { it.id }.ifEmpty { mapOf(session.userId to session.user()) }
                     _currentUser.value = _users.value[session.userId] ?: session.user()
                     _lastSyncError.value = null
@@ -185,29 +190,51 @@ class HomeRepository(
         }.onFailure { _lastSyncError.value = it.message ?: "Sync failed" }
     }
 
+    /** Stamps ownership/revision/updatedAt onto an item about to be written locally. */
+    private fun normalize(item: HomeItem): HomeItem {
+        val session = sessionStore.load()
+        return item.copy(
+            householdId = session?.householdId?.takeIf { it.isNotBlank() } ?: item.householdId,
+            creatorId = item.creatorId.takeIf { it.isNotBlank() && it != "u1" && it != "u2" }
+                ?: session?.userId ?: item.creatorId,
+            revision = item.revision + 1,
+            updatedAt = Instant.now(),
+        )
+    }
+
+    /**
+     * The one and only local write path: reads the current copy of [id], applies [block] to it and
+     * atomically persists the result to SQLite, the pending set and [_items] — all under [dbMutex],
+     * with no network call inside. Returns the written item, or null when [block] declines.
+     */
+    private suspend fun commitLocal(id: String, block: (HomeItem?) -> HomeItem?): HomeItem? = dbMutex.withLock {
+        val next = block(_items.value.firstOrNull { it.id == id })?.let(::normalize) ?: return@withLock null
+        database.upsert(next)
+        markPendingLocked(next.id)
+        _items.value = (_items.value.filterNot { it.id == next.id } + next)
+            .filter { it.status != ItemStatus.CANCELLED }
+            .sortedBy { it.updatedAt }
+        next
+    }
+
+    /** Pushes one already-persisted item. Never called while holding [dbMutex]. */
+    private suspend fun pushLocal(item: HomeItem) {
+        if (!api.configured || sessionStore.load() == null) {
+            dbMutex.withLock { clearPendingLocked(item.id) }
+            return
+        }
+        runCatching { api.upsertItem(item, validSession()) }
+            .onSuccess { dbMutex.withLock { clearPendingLocked(item.id) }; _lastSyncError.value = null }
+            .onFailure { _lastSyncError.value = it.message ?: "Save queued (will retry)" }
+    }
+
     suspend fun save(item: HomeItem): Result<HomeItem> = withContext(Dispatchers.IO) {
         // Local-first: persist the change to the device immediately (so it survives a restart and
         // shows instantly), then push to the backend in the background. A failed push keeps the item
         // flagged pending and is retried on the next sync — the change is never silently lost.
         runCatching {
-            val now = Instant.now()
-            val session = sessionStore.load()
-            val normalized = item.copy(
-                householdId = session?.householdId?.takeIf { it.isNotBlank() } ?: item.householdId,
-                creatorId = item.creatorId.takeIf { it.isNotBlank() && it != "u1" && it != "u2" }
-                    ?: session?.userId ?: item.creatorId,
-                revision = item.revision + 1,
-                updatedAt = now,
-            )
-            database.upsert(normalized)
-            markPending(normalized.id)
-            _items.value = (_items.value.filterNot { it.id == normalized.id } + normalized).filter { it.status != ItemStatus.CANCELLED }.sortedBy { it.updatedAt }
-            if (api.configured && session != null) {
-                runCatching { api.upsertItem(normalized, validSession()) }
-                    .onSuccess { clearPending(normalized.id); _lastSyncError.value = null }
-                    .onFailure { _lastSyncError.value = it.message ?: "Save queued (will retry)" }
-            } else clearPending(normalized.id)
-            val saved = normalized
+            val saved = commitLocal(item.id) { item } ?: error("Save failed")
+            pushLocal(saved)
             saved
         }.onFailure { _lastSyncError.value = it.message ?: "Save failed" }
     }
@@ -238,10 +265,14 @@ class HomeRepository(
     }
 
     /** Sets [userId]'s reminders on an item while preserving the other member's reminders. */
-    suspend fun setReminders(itemId: String, userId: String, reminders: List<Reminder>): Result<HomeItem> {
-        val item = _items.value.firstOrNull { it.id == itemId } ?: return Result.failure(NoSuchElementException(itemId))
-        val merged = item.reminders.filter { it.userId != userId } + reminders.map { it.copy(userId = userId) }
-        return save(item.copy(reminders = merged))
+    suspend fun setReminders(itemId: String, userId: String, reminders: List<Reminder>): Result<HomeItem> = withContext(Dispatchers.IO) {
+        runCatching {
+            val saved = commitLocal(itemId) { current ->
+                current?.copy(reminders = current.reminders.filter { it.userId != userId } + reminders.map { it.copy(userId = userId) })
+            } ?: throw NoSuchElementException(itemId)
+            pushLocal(saved)
+            saved
+        }.onFailure { if (it !is NoSuchElementException) _lastSyncError.value = it.message ?: "Save failed" }
     }
 
     /**
@@ -250,11 +281,7 @@ class HomeRepository(
      * and hide CANCELLED items everywhere. This persists across devices and survives a sync,
      * unlike a hard DELETE which the server silently ignores.
      */
-    suspend fun delete(id: String): Result<Unit> {
-        val item = _items.value.firstOrNull { it.id == id } ?: return Result.failure(NoSuchElementException(id))
-        return save(item.copy(status = ItemStatus.CANCELLED)).map { Unit }
-            .also { if (it.isSuccess) _items.value = _items.value.filterNot { i -> i.id == id } }
-    }
+    suspend fun delete(id: String): Result<Unit> = mutate(id) { it.copy(status = ItemStatus.CANCELLED) }
 
     suspend fun markNoteRead(itemId: String, userId: String): Result<Unit> = mutate(itemId) { item ->
         item.copy(readReceipts = item.readReceipts.filterNot { it.userId == userId } + ReadReceipt(userId, Instant.now()))
@@ -286,13 +313,28 @@ class HomeRepository(
         sessionStore.load()?.let { sessionStore.save(it.copy(displayName = name, avatar = glyph, accentArgb = accentArgb)) }
     }
 
+    /**
+     * Ends the session and wipes every trace of the member from this device: items AND metadata
+     * (preferences, notifications-seen, pending ids). The wipe runs under [dbMutex] so an in-flight
+     * save cannot re-create a row after it. Callers must also clear the PIN and cancel the
+     * scheduled alarms (see HomeAppRoot) — those live outside this class.
+     */
     fun logout() {
         realtime?.cancel()
         realtime = null
         realtimeToken = null
         sessionStore.clear()
-        database.clearAll()
         _items.value = emptyList()
+        _notificationsSeenAt.value = null
+        _pendingIds.value = emptySet()
+        scope.launch {
+            dbMutex.withLock {
+                database.clearEverything()
+                _items.value = emptyList()
+                _pendingIds.value = emptySet()
+            }
+            preferences.reload()
+        }
     }
 
     private suspend fun validSession(): AuthSession {
@@ -310,8 +352,69 @@ class HomeRepository(
         realtime = api.openRealtime(session) { scope.launch { syncNow() } }
     }
 
-    private suspend fun mutate(id: String, block: (HomeItem) -> HomeItem): Result<Unit> {
-        val item = _items.value.firstOrNull { it.id == id } ?: return Result.failure(NoSuchElementException(id))
-        return save(block(item)).map { Unit }
+    /**
+     * Read-modify-write of a single item, applied to the *freshly read* row inside [dbMutex] so two
+     * rapid edits on the same device (e.g. ticking two checklist boxes) cannot lose each other (N4).
+     */
+    private suspend fun mutate(id: String, block: (HomeItem) -> HomeItem): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val saved = commitLocal(id) { current -> current?.let(block) } ?: throw NoSuchElementException(id)
+            pushLocal(saved)
+        }.onFailure { if (it !is NoSuchElementException) _lastSyncError.value = it.message ?: "Save failed" }
     }
+}
+
+/**
+ * Notifications derived from real signals: items updated by the OTHER user, task/list completions
+ * by the other user, new comments authored by the other user, and items the author explicitly
+ * flagged with "הודע למשתמש השני" ([HomeItem.notifyOtherUser]) — those always notify the other
+ * member, whatever the update heuristics say. An item is "unread" while its timestamp is after the
+ * current user's notifications-seen timestamp.
+ *
+ * Top-level and internal so it can be unit-tested without an Android SQLite instance.
+ */
+internal fun deriveNotifications(items: List<HomeItem>, meId: String, seenAt: Instant?): List<AppNotification> {
+    val forcedIds = items.filter { it.notifyOtherUser && it.creatorId != meId }.map { it.id }.toSet()
+    return items.asSequence()
+        .filter { it.status != ItemStatus.ARCHIVED }
+        .filter { it.creatorId != meId || it.comments.any { c -> c.authorId != meId } }
+        .mapNotNull { item ->
+            val otherComment = item.comments.filter { it.authorId != meId }.maxByOrNull { it.createdAt }
+            val fromOther = item.creatorId != meId
+            // Explicitly requested by the author, and I am not the author → always notify me.
+            val forced = fromOther && item.notifyOtherUser
+            val (title, detail, at) = when {
+                fromOther && item.status == ItemStatus.COMPLETED ->
+                    Triple("הושלם: ${item.title}", "המשימה סומנה כהושלמה", item.updatedAt)
+                otherComment != null && (fromOther || otherComment.createdAt >= item.updatedAt.minusSeconds(1)) ->
+                    Triple("תגובה חדשה: ${item.title}", otherComment.text, otherComment.createdAt)
+                forced ->
+                    Triple("התראה: ${item.title}", labelFor(item), item.updatedAt)
+                fromOther ->
+                    Triple("עודכן: ${item.title}", labelFor(item), item.updatedAt)
+                else -> return@mapNotNull null
+            }
+            AppNotification(
+                recipientId = meId,
+                itemId = item.id,
+                title = title,
+                detail = detail,
+                read = seenAt != null && !at.isAfter(seenAt),
+                createdAt = at,
+            )
+        }
+        // Explicitly-flagged unread items are never squeezed out by the 30-item cap.
+        .sortedWith(
+            compareByDescending<AppNotification> { it.itemId.orEmpty() in forcedIds && !it.read }
+                .thenByDescending { it.createdAt }
+        )
+        .take(30)
+        .toList()
+}
+
+private fun labelFor(item: HomeItem): String = when (item.type) {
+    ItemType.EVENT -> "אירוע עודכן"
+    ItemType.TASK -> "משימה עודכנה"
+    ItemType.LIST -> "רשימה עודכנה"
+    ItemType.NOTE -> "פתק חדש"
 }

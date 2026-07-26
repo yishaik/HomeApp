@@ -22,6 +22,9 @@ class PreferencesStore(private val database: LocalDatabase) {
         return runCatching { decode(raw) }.getOrDefault(UserPreferences(userId = ""))
     }
 
+    /** Re-reads preferences from storage, dropping the in-memory copy (used after a logout wipe). */
+    fun reload(): UserPreferences = read().also { _prefs.value = it }
+
     fun update(transform: (UserPreferences) -> UserPreferences): UserPreferences {
         val next = transform(_prefs.value)
         database.setMetadata(KEY_PREFS, encode(next))

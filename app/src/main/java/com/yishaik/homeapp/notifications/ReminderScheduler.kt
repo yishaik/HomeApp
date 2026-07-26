@@ -44,6 +44,13 @@ class ReminderScheduler(private val context: Context) {
         registry.edit().remove(itemId).apply()
     }
 
+    /** Cancels every alarm this device has registered and empties the registry (used on logout, so
+     *  the departing member's reminders stop firing for whoever activates next). */
+    fun cancelAll() {
+        registry.all.keys.toList().forEach(::cancel)
+        registry.edit().clear().apply()
+    }
+
     private fun setAlarm(requestCode: Int, item: HomeItem, triggerAt: Instant) {
         val intent = Intent(context, ReminderReceiver::class.java).apply {
             putExtra("item_id", item.id); putExtra("title", item.title); putExtra("type", item.type.name)

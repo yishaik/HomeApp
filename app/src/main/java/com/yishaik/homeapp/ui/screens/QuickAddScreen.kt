@@ -38,7 +38,6 @@ private val assigneeChoices = listOf(Assignee.USER_ONE to "ישי", Assignee.USE
 fun QuickAddSheet(
     currentUser: AppUser,
     memberIds: Collection<String>,
-    online: Boolean,
     defaultEventReminderMinutes: Int,
     defaultTaskReminderMinutes: Int,
     onDismiss: () -> Unit,
@@ -148,8 +147,8 @@ fun QuickAddSheet(
                         readReceipts = if (type == ItemType.NOTE) noteReaders.map { ReadReceipt(it, null) } else emptyList(),
                     ))
                 },
-                enabled = online && canSave, modifier = Modifier.fillMaxWidth()
-            ) { Text(if (online) "שמירה" else "לא ניתן לערוך במצב לא מקוון") }
+                enabled = canSave, modifier = Modifier.fillMaxWidth()
+            ) { Text("שמירה") }
             Spacer(Modifier.height(20.dp))
         }
     }

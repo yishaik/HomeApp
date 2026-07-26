@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,13 +33,20 @@ import java.util.Locale
 /** Quick actions available from an item card's long-press menu. */
 enum class ItemQuickAction { TOGGLE_PIN, ARCHIVE, DELETE, COMPLETE }
 
+/**
+ * Ids of items with local changes not yet pushed to the backend. Provided once by HomeAppRoot from
+ * `HomeRepository.pendingIds` and read by [ItemCard], which would otherwise need the set threaded
+ * through all six list screens and their ~15 call sites.
+ */
+val LocalPendingItemIds = compositionLocalOf { emptySet<String>() }
+
 @Composable
 fun OfflineBanner() {
     Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.CloudOff, null, tint = MaterialTheme.colorScheme.onErrorContainer)
             Spacer(Modifier.width(8.dp))
-            Text("מצב לא מקוון — צפייה בלבד", color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.labelLarge)
+            Text("מצב לא מקוון — השינויים יסונכרנו כשהחיבור יחזור", color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.labelLarge)
         }
     }
 }
@@ -117,6 +125,10 @@ fun ItemCard(
                     }
                 }
                 if (item.pinned) Icon(Icons.Default.PushPin, null, tint = NoteColor, modifier = Modifier.size(18.dp))
+                if (item.id in LocalPendingItemIds.current) {
+                    Spacer(Modifier.width(4.dp))
+                    Icon(Icons.Default.CloudQueue, "ממתין לסנכרון", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                }
                 if (onQuickAction != null) {
                     DropdownMenu(menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(

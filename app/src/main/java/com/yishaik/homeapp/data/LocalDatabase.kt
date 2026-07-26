@@ -18,6 +18,11 @@ class LocalDatabase(context: Context) : SQLiteOpenHelper(context, "homeapp.db", 
         buildList { while (c.moveToNext()) runCatching { JsonCodec.decode(c.getString(0)) }.getOrNull()?.let(::add) }
     }
 
+    /** Single-row read, used by the pending-push loop so it can decide under the write lock. */
+    fun readItem(id: String): HomeItem? = readableDatabase.query("items", arrayOf("payload"), "id=?", arrayOf(id), null, null, null).use { c ->
+        if (c.moveToFirst()) runCatching { JsonCodec.decode(c.getString(0)) }.getOrNull() else null
+    }
+
     fun upsert(item: HomeItem) {
         writableDatabase.insertWithOnConflict("items", null, ContentValues().apply {
             put("id", item.id); put("payload", JsonCodec.encode(item)); put("updated_at", item.updatedAt.toString())
@@ -33,6 +38,13 @@ class LocalDatabase(context: Context) : SQLiteOpenHelper(context, "homeapp.db", 
     }
 
     fun clearAll() = writableDatabase.transaction { delete("items", null, null) }
+
+    /** Truncates items AND metadata — used on logout so no state (preferences, notifications-seen,
+     *  pending-push ids) of the departing member survives for whoever activates next. */
+    fun clearEverything() = writableDatabase.transaction {
+        delete("items", null, null)
+        delete("metadata", null, null)
+    }
 
     fun deleteItem(id: String) { writableDatabase.delete("items", "id=?", arrayOf(id)) }
 

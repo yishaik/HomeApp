@@ -27,6 +27,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +46,7 @@ import com.yishaik.homeapp.HomeApplication
 import com.yishaik.homeapp.domain.HomeItem
 import com.yishaik.homeapp.security.ActivationOutcome
 import com.yishaik.homeapp.ui.components.ItemQuickAction
+import com.yishaik.homeapp.ui.components.LocalPendingItemIds
 import com.yishaik.homeapp.ui.components.OfflineBanner
 import com.yishaik.homeapp.ui.screens.ActivationScreen
 import com.yishaik.homeapp.ui.screens.CalendarScreen
@@ -143,7 +145,11 @@ fun HomeAppRoot(app: HomeApplication) {
         }
         !unlocked -> PinUnlockScreen { pin -> if (app.pinVault.verify(pin)) unlocked = true }
         else -> MainApp(app, onLogout = {
+            // Leave nothing of the departing member on the device: local data + metadata (repository),
+            // the PIN that guards the app, and every alarm previously scheduled for their reminders.
             app.repository.logout()
+            app.pinVault.clearPin()
+            app.reminderScheduler.cancelAll()
             activated = false
             unlocked = false
             needsPinSetup = false
@@ -159,6 +165,7 @@ private fun MainApp(app: HomeApplication, onLogout: () -> Unit) {
     val online by app.repository.online.collectAsStateWithLifecycle()
     val user by app.repository.currentUser.collectAsStateWithLifecycle()
     val users by app.repository.users.collectAsStateWithLifecycle()
+    val pendingIds by app.repository.pendingIds.collectAsStateWithLifecycle()
     val notifications by app.repository.notifications.collectAsStateWithLifecycle()
     val unreadCount by app.repository.unreadCount.collectAsStateWithLifecycle()
     val preferences by app.preferencesStore.prefs.collectAsStateWithLifecycle()
@@ -178,7 +185,6 @@ private fun MainApp(app: HomeApplication, onLogout: () -> Unit) {
             item = selectedItem!!,
             users = users,
             currentUser = user,
-            online = online,
             onBack = { selectedItem = null },
             onSave = { changed -> scope.launch { app.repository.save(changed).onSuccess { app.reminderScheduler.schedule(it, user.id); selectedItem = it } } },
             onComplete = { scope.launch { val id = selectedItem!!.id; app.repository.complete(id); app.reminderScheduler.cancel(id); selectedItem = null } },
@@ -279,39 +285,41 @@ private fun MainApp(app: HomeApplication, onLogout: () -> Unit) {
                 }
             }
         }
-        NavHost(nav, startDestination = preferences.startDestination.takeIf { d -> destinations.any { it.route == d } } ?: "today", modifier = Modifier.padding(padding)) {
-            composable("today") { TodayScreen(items, users, user, onOpenItem = { selectedItem = it }, onQuickAction = onQuickAction) }
-            composable("calendar") { CalendarScreen(items, users, onOpenItem = { selectedItem = it }) }
-            composable("tasks") {
-                TasksScreen(
-                    items,
-                    users,
-                    user,
-                    onOpenItem = { selectedItem = it },
-                    onComplete = { scope.launch { app.repository.complete(it.id) } },
-                    onQuickAction = onQuickAction,
-                )
+        CompositionLocalProvider(LocalPendingItemIds provides pendingIds) {
+            NavHost(nav, startDestination = preferences.startDestination.takeIf { d -> destinations.any { it.route == d } } ?: "today", modifier = Modifier.padding(padding)) {
+                composable("today") { TodayScreen(items, users, user, onOpenItem = { selectedItem = it }, onQuickAction = onQuickAction) }
+                composable("calendar") { CalendarScreen(items, users, onOpenItem = { selectedItem = it }) }
+                composable("tasks") {
+                    TasksScreen(
+                        items,
+                        users,
+                        user,
+                        onOpenItem = { selectedItem = it },
+                        onComplete = { scope.launch { app.repository.complete(it.id) } },
+                        onQuickAction = onQuickAction,
+                    )
+                }
+                composable("lists") {
+                    ListsScreen(
+                        items,
+                        users,
+                        onOpenItem = { selectedItem = it },
+                        onToggle = { item, entryId -> scope.launch { app.repository.toggleChecklist(item.id, entryId) } },
+                        onQuickAction = onQuickAction,
+                    )
+                }
+                composable("notes") {
+                    NotesScreen(
+                        items,
+                        users,
+                        user,
+                        onOpenItem = { selectedItem = it },
+                        onRead = { scope.launch { app.repository.markNoteRead(it.id, user.id) } },
+                        onQuickAction = onQuickAction,
+                    )
+                }
+                composable("search") { SearchScreen(items, users, onOpenItem = { selectedItem = it }, onQuickAction = onQuickAction) }
             }
-            composable("lists") {
-                ListsScreen(
-                    items,
-                    users,
-                    onOpenItem = { selectedItem = it },
-                    onToggle = { item, entryId -> scope.launch { app.repository.toggleChecklist(item.id, entryId) } },
-                    onQuickAction = onQuickAction,
-                )
-            }
-            composable("notes") {
-                NotesScreen(
-                    items,
-                    users,
-                    user,
-                    onOpenItem = { selectedItem = it },
-                    onRead = { scope.launch { app.repository.markNoteRead(it.id, user.id) } },
-                    onQuickAction = onQuickAction,
-                )
-            }
-            composable("search") { SearchScreen(items, users, onOpenItem = { selectedItem = it }, onQuickAction = onQuickAction) }
         }
     }
 
@@ -319,7 +327,6 @@ private fun MainApp(app: HomeApplication, onLogout: () -> Unit) {
         QuickAddSheet(
             currentUser = user,
             memberIds = users.keys,
-            online = online,
             defaultEventReminderMinutes = preferences.defaultEventReminderMinutes.firstOrNull() ?: 30,
             defaultTaskReminderMinutes = preferences.defaultTaskReminderMinutes.firstOrNull() ?: 0,
             onDismiss = { showAdd = false },

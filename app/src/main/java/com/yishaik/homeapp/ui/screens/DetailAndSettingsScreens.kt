@@ -41,7 +41,6 @@ fun ItemDetailScreen(
     item: HomeItem,
     users: Map<String, AppUser>,
     currentUser: AppUser,
-    online: Boolean,
     onBack: () -> Unit,
     onSave: (HomeItem) -> Unit,
     onComplete: () -> Unit,
@@ -83,8 +82,8 @@ fun ItemDetailScreen(
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
             actions = {
                 if (editable) IconButton(onClick = { editing = !editing }) { Icon(if (editing) Icons.Default.Close else Icons.Default.Edit, null) }
-                IconButton(onClick = { onSave(item.copy(pinned = !item.pinned)) }, enabled = online) { Icon(if (item.pinned) Icons.Filled.PushPin else Icons.Outlined.PushPin, null, tint = if (item.pinned) itemColor(item.type) else LocalContentColor.current) }
-                IconButton(onClick = { showMenu = true }, enabled = online) { Icon(Icons.Default.MoreVert, null) }
+                IconButton(onClick = { onSave(item.copy(pinned = !item.pinned)) }) { Icon(if (item.pinned) Icons.Filled.PushPin else Icons.Outlined.PushPin, null, tint = if (item.pinned) itemColor(item.type) else LocalContentColor.current) }
+                IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, null) }
                 DropdownMenu(showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(text = { Text("העברה לארכיון") }, onClick = { showMenu = false; onArchive() }, leadingIcon = { Icon(Icons.Default.Archive, null) })
                     DropdownMenuItem(text = { Text("מחיקה") }, onClick = { showMenu = false; showDelete = true }, leadingIcon = { Icon(Icons.Default.Delete, null) })
@@ -154,7 +153,7 @@ fun ItemDetailScreen(
                 }
             }
             item { Metadata(item, users, context) }
-            if ((item.type == ItemType.EVENT || item.type == ItemType.TASK) && online) item {
+            if (item.type == ItemType.EVENT || item.type == ItemType.TASK) item {
                 val current = item.reminders.firstOrNull { it.userId == currentUser.id }?.minutesBefore
                 Card { Column(Modifier.padding(16.dp)) {
                     Text("תזכורת", fontWeight = FontWeight.Bold)
@@ -210,7 +209,7 @@ fun ItemDetailScreen(
                     IconButton(enabled = comment.isNotBlank(), onClick = { onSave(item.copy(comments = item.comments + Comment(authorId = currentUser.id, text = comment))); comment = "" }) { Icon(Icons.Default.Send, null) }
                 })
             }
-            if (item.type == ItemType.TASK || item.type == ItemType.LIST) item { Button(onClick = onComplete, enabled = online && item.status == ItemStatus.ACTIVE, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Done, null); Spacer(Modifier.width(8.dp)); Text("סימון כהושלם") } }
+            if (item.type == ItemType.TASK || item.type == ItemType.LIST) item { Button(onClick = onComplete, enabled = item.status == ItemStatus.ACTIVE, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Done, null); Spacer(Modifier.width(8.dp)); Text("סימון כהושלם") } }
             if (item.type == ItemType.NOTE) item { ReadByRow(item, users) }
             item { Spacer(Modifier.height(32.dp)) }
         }
